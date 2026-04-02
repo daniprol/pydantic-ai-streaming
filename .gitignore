@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+dist-ssr/
+*.tgz
+
+# pnpm
+.pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.sw?
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+logs/
+
+# Temp
+scratch/
+tmp/
+
+# Database
+*.db
+
+# TypeScript build info
+tsconfig.tsbuildinfo

@@ -1,0 +1,67 @@
+import pluginJs from '@eslint/js'
+import eslintConfigPrettier from 'eslint-config-prettier/flat'
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
+import globals from 'globals'
+import neostandard from 'neostandard'
+import tseslint from 'typescript-eslint'
+import { defineConfig } from 'eslint/config'
+
+export default defineConfig(
+  pluginJs.configs.recommended,
+  tseslint.configs.strictTypeChecked,
+  tseslint.configs.stylisticTypeChecked,
+  neostandard({ noJsx: true, noStyle: true }),
+  eslintPluginPrettierRecommended,
+  eslintConfigPrettier,
+  { files: ['apps/web/src/*.{js,mjs,cjs,ts,tsx}'] },
+  {
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'scratch/**',
+      'apps/api/**',
+      'apps/web/dist/**',
+      'commitlint.config.js',
+    ],
+  },
+  {
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrors: 'all',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        {
+          allow: [{ name: ['Error', 'URL', 'URLSearchParams'], from: 'lib' }],
+          allowAny: true,
+          allowBoolean: true,
+          allowNullish: true,
+          allowNumber: true,
+          allowRegExp: true,
+        },
+      ],
+      '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+)
