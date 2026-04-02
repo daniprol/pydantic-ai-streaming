@@ -17,7 +17,6 @@ from streaming_chat_api.clients.fake_support import FakeSupportClient
 from streaming_chat_api.config.settings import Settings, get_settings
 from streaming_chat_api.db.base import Base
 from streaming_chat_api.db.session import create_engine_from_settings
-from streaming_chat_api.models.entities import FlowType
 from streaming_chat_api.services.replay import ReplayStreamBroker
 
 
