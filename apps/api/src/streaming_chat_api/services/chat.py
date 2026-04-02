@@ -26,6 +26,7 @@ from streaming_chat_api.schemas.chat import (
     ConversationMessagesResponse,
     ConversationSummary,
 )
+from streaming_chat_api.schemas.pagination import OffsetPaginationParams
 from streaming_chat_api.services.runtime import AppResources
 
 
@@ -85,8 +86,14 @@ class ChatFlowRunner:
         except ValidationError as exc:
             raise RequestValidationError(exc.errors()) from exc
         deferred_tool_results = _build_deferred_tool_results(payload)
-        new_message = _latest_user_message(ui_messages) if payload.trigger == 'submit-message' else None
-        if new_message is None and deferred_tool_results is None and payload.trigger != 'regenerate-message':
+        new_message = (
+            _latest_user_message(ui_messages) if payload.trigger == 'submit-message' else None
+        )
+        if (
+            new_message is None
+            and deferred_tool_results is None
+            and payload.trigger != 'regenerate-message'
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail='Request must include a new user message, a regenerate trigger, or deferred tool results.',
@@ -120,7 +127,9 @@ class ChatFlowRunner:
             )
         await repository.update_thread_metadata(
             thread,
-            task_queue=resources.settings.temporal.task_queue if self.flow_type == FlowType.TEMPORAL else None,
+            task_queue=resources.settings.temporal.task_queue
+            if self.flow_type == FlowType.TEMPORAL
+            else None,
             dbos_workflow_id=str(conversation.id)
             if self.flow_type in {FlowType.DBOS, FlowType.DBOS_REPLAY}
             else None,
@@ -220,7 +229,9 @@ class ChatService:
         self.runners = {
             FlowType.BASIC: ChatFlowRunner(flow_type=FlowType.BASIC, agent=resources.agents.basic),
             FlowType.DBOS: ChatFlowRunner(flow_type=FlowType.DBOS, agent=resources.agents.dbos),
-            FlowType.TEMPORAL: ChatFlowRunner(flow_type=FlowType.TEMPORAL, agent=resources.agents.temporal),
+            FlowType.TEMPORAL: ChatFlowRunner(
+                flow_type=FlowType.TEMPORAL, agent=resources.agents.temporal
+            ),
             FlowType.DBOS_REPLAY: ChatFlowRunner(
                 flow_type=FlowType.DBOS_REPLAY,
                 agent=resources.agents.dbos_replay,
@@ -234,26 +245,24 @@ class ChatService:
         db: AsyncSession,
         session_id: str,
         flow_type: FlowType,
-        page: int,
-        page_size: int,
-        sort: str,
-        direction: str,
+        pagination: OffsetPaginationParams,
     ) -> ConversationListResponse:
         repository = ChatRepository(db)
         chat_session = await repository.get_or_create_session(session_id)
         conversations, total = await repository.list_conversations(
             session_id=chat_session.id,
             flow_type=flow_type,
-            page=page,
-            page_size=page_size,
-            sort_field=sort,
-            direction=direction,
+            skip=pagination.skip,
+            limit=pagination.limit,
         )
         await db.commit()
         return ConversationListResponse(
-            items=[ConversationSummary.model_validate(conversation, from_attributes=True) for conversation in conversations],
-            page=page,
-            page_size=page_size,
+            items=[
+                ConversationSummary.model_validate(conversation, from_attributes=True)
+                for conversation in conversations
+            ],
+            skip=pagination.skip,
+            limit=pagination.limit,
             total=total,
         )
 
@@ -267,7 +276,9 @@ class ChatService:
     ) -> ConversationMessagesResponse:
         repository = ChatRepository(db)
         chat_session = await repository.get_or_create_session(session_id)
-        conversation = await repository.get_conversation(chat_session.id, conversation_id, flow_type)
+        conversation = await repository.get_conversation(
+            chat_session.id, conversation_id, flow_type
+        )
         if conversation is None:
             return ConversationMessagesResponse(
                 conversation_id=conversation_id,

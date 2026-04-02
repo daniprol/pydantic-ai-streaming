@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from streaming_chat_api.dependencies.resources import get_db_session, get_resources, get_session_id
 from streaming_chat_api.models.entities import FlowType
 from streaming_chat_api.schemas.chat import ConversationListResponse, ConversationMessagesResponse
+from streaming_chat_api.schemas.pagination import OffsetPaginationParams
 from streaming_chat_api.services.chat import ChatService
 from streaming_chat_api.services.runtime import AppResources
 from streaming_chat_api.ui import replay_stream_response
@@ -23,10 +26,7 @@ def get_chat_service(resources: AppResources = Depends(get_resources)) -> ChatSe
 @router.get('/{flow}/conversations', response_model=ConversationListResponse)
 async def list_conversations(
     flow: FlowType,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    sort: str = Query(default='updated_at'),
-    direction: str = Query(default='desc'),
+    pagination: Annotated[OffsetPaginationParams, Depends()],
     session_id: str = Depends(get_session_id),
     db: AsyncSession = Depends(get_db_session),
     service: ChatService = Depends(get_chat_service),
@@ -35,10 +35,7 @@ async def list_conversations(
         db=db,
         session_id=session_id,
         flow_type=flow,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        direction=direction,
+        pagination=pagination,
     )
 
 
@@ -85,5 +82,7 @@ async def replay_stream(
     request: Request,
     resources: AppResources = Depends(get_resources),
 ):
-    last_event_id = request.query_params.get('last_event_id') or request.headers.get('last-event-id')
+    last_event_id = request.query_params.get('last_event_id') or request.headers.get(
+        'last-event-id'
+    )
     return replay_stream_response(resources.replay_broker.replay_stream(replay_id, last_event_id))

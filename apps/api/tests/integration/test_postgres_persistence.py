@@ -26,8 +26,14 @@ async def test_postgres_repository_persists_session_conversation_and_messages(
         conversation_id=conversation.id,
         role='user',
         sequence=1,
-        ui_message_json={'id': 'user-1', 'role': 'user', 'parts': [{'type': 'text', 'text': 'hello'}]},
-        model_messages_json=[{'kind': 'request', 'parts': [{'part_kind': 'user-prompt', 'content': 'hello'}]}],
+        ui_message_json={
+            'id': 'user-1',
+            'role': 'user',
+            'parts': [{'type': 'text', 'text': 'hello'}],
+        },
+        model_messages_json=[
+            {'kind': 'request', 'parts': [{'part_kind': 'user-prompt', 'content': 'hello'}]}
+        ],
     )
     await postgres_db_session.commit()
 
@@ -35,10 +41,8 @@ async def test_postgres_repository_persists_session_conversation_and_messages(
     conversations, total = await repository.list_conversations(
         session_id=session.id,
         flow_type=FlowType.BASIC,
-        page=1,
-        page_size=10,
-        sort_field='updated_at',
-        direction='desc',
+        skip=0,
+        limit=10,
     )
     messages = await repository.list_messages(conversation.id)
 
@@ -75,10 +79,8 @@ async def test_postgres_repository_keeps_flow_histories_partitioned(
     basic_conversations, total = await repository.list_conversations(
         session_id=session.id,
         flow_type=FlowType.BASIC,
-        page=1,
-        page_size=10,
-        sort_field='updated_at',
-        direction='desc',
+        skip=0,
+        limit=10,
     )
 
     assert total == 1

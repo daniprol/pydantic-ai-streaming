@@ -11,7 +11,12 @@ import httpx
 import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from streaming_chat_api.agents.registry import AgentDependencies, build_support_agent
 from streaming_chat_api.clients.fake_support import FakeSupportClient
@@ -177,7 +182,9 @@ async def app(resources: AppResources, test_settings: Settings) -> AsyncIterator
 
 
 @pytest.fixture
-async def postgres_app(postgres_resources: AppResources, postgres_settings: Settings) -> AsyncIterator[FastAPI]:
+async def postgres_app(
+    postgres_resources: AppResources, postgres_settings: Settings
+) -> AsyncIterator[FastAPI]:
     get_settings.cache_clear()
     app = create_app(postgres_settings)
 

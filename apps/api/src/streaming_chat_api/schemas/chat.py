@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from streaming_chat_api.models.entities import FlowType
+from streaming_chat_api.schemas.pagination import PaginatedResponse
 
 
 class ConversationSummary(BaseModel):
@@ -19,11 +20,8 @@ class ConversationSummary(BaseModel):
     updated_at: datetime
 
 
-class ConversationListResponse(BaseModel):
-    items: list[ConversationSummary]
-    page: int
-    page_size: int
-    total: int
+class ConversationListResponse(PaginatedResponse[ConversationSummary]):
+    pass
 
 
 class ConversationMessagesResponse(BaseModel):
@@ -45,7 +43,7 @@ class ChatRequestEnvelope(BaseModel):
 
     trigger: Literal['submit-message', 'regenerate-message'] = 'submit-message'
     id: str | None = None
-    message_id: str | None = None
+    message_id: str | None = Field(default=None, alias='messageId')
     messages: list[dict] = Field(default_factory=list)
     deferred_tool_results: DeferredToolResultsPayload | None = Field(
         default=None,

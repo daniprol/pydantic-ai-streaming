@@ -76,7 +76,12 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
 
     dbos_initialized = False
     try:
-        DBOS(config={'name': settings.app.name, 'system_database_url': settings.dbos.system_database_url})
+        DBOS(
+            config={
+                'name': settings.app.name,
+                'system_database_url': settings.dbos.system_database_url,
+            }
+        )
         DBOS.launch()
         dbos_initialized = True
     except Exception:

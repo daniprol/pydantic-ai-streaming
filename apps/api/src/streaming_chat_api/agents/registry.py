@@ -32,17 +32,16 @@ def _load_prompt(filename: str) -> str:
 def build_model(settings: Settings):
     if settings.llm.use_test_model:
         return TestModel()
-    if settings.llm_configured:
-        provider = AzureProvider(
-            azure_endpoint=settings.llm.azure_endpoint,
-            api_key=settings.llm.azure_api_key,
-            api_version=settings.llm.openai_api_version,
-        )
-        return OpenAIChatModel(
-            settings.llm.azure_model,
-            provider=cast(OpenAIProvider, provider),
-        )
-    return TestModel()
+
+    provider = AzureProvider(
+        azure_endpoint=settings.llm.azure_endpoint,
+        api_key=settings.llm.azure_api_key,
+        api_version=settings.llm.openai_api_version,
+    )
+    return OpenAIChatModel(
+        settings.llm.azure_model,
+        provider=cast(OpenAIProvider, provider),
+    )
 
 
 def build_research_agent(settings: Settings) -> Agent[None, str]:
@@ -65,7 +64,9 @@ def build_support_agent(settings: Settings) -> Agent[AgentDependencies, str]:
     )
 
     @agent.tool
-    async def lookup_order_status(ctx: RunContext[AgentDependencies], order_id: str) -> dict[str, str]:
+    async def lookup_order_status(
+        ctx: RunContext[AgentDependencies], order_id: str
+    ) -> dict[str, str]:
         return await ctx.deps.support_client.lookup_order_status(order_id)
 
     @agent.tool

@@ -6,15 +6,26 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from streaming_chat_api.models.entities import ChatConversation, ChatMessage, ChatSession, ChatThread, FlowType, utcnow
+from streaming_chat_api.models.entities import (
+    ChatConversation,
+    ChatMessage,
+    ChatSession,
+    ChatThread,
+    FlowType,
+    utcnow,
+)
 
 
 class ChatRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_or_create_session(self, client_id: str, user_agent: str | None = None) -> ChatSession:
-        result = await self.session.execute(select(ChatSession).where(ChatSession.client_id == client_id))
+    async def get_or_create_session(
+        self, client_id: str, user_agent: str | None = None
+    ) -> ChatSession:
+        result = await self.session.execute(
+            select(ChatSession).where(ChatSession.client_id == client_id)
+        )
         chat_session = result.scalar_one_or_none()
         if chat_session is None:
             chat_session = ChatSession(client_id=client_id, user_agent=user_agent)
@@ -80,26 +91,16 @@ class ChatRepository:
         *,
         session_id: UUID,
         flow_type: FlowType,
-        page: int,
-        page_size: int,
-        sort_field: str,
-        direction: str,
+        skip: int,
+        limit: int,
     ) -> tuple[list[ChatConversation], int]:
-        sort_column = ChatConversation.updated_at if sort_field == 'updated_at' else ChatConversation.created_at
-        if direction == 'asc':
-            order_by = sort_column.asc()
-        else:
-            order_by = sort_column.desc()
-
         base_query: Select[tuple[ChatConversation]] = select(ChatConversation).where(
             ChatConversation.session_id == session_id,
             ChatConversation.flow_type == flow_type,
         )
-        total = await self.session.scalar(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        total = await self.session.scalar(select(func.count()).select_from(base_query.subquery()))
         result = await self.session.execute(
-            base_query.order_by(order_by).offset((page - 1) * page_size).limit(page_size)
+            base_query.order_by(ChatConversation.updated_at.desc()).offset(skip).limit(limit)
         )
         return list(result.scalars().all()), int(total or 0)
 
@@ -113,7 +114,9 @@ class ChatRepository:
 
     async def next_sequence(self, conversation_id: UUID) -> int:
         current = await self.session.scalar(
-            select(func.max(ChatMessage.sequence)).where(ChatMessage.conversation_id == conversation_id)
+            select(func.max(ChatMessage.sequence)).where(
+                ChatMessage.conversation_id == conversation_id
+            )
         )
         return int(current or 0) + 1
 
@@ -146,7 +149,9 @@ class ChatRepository:
             conversation.preview = preview
         conversation.updated_at = utcnow()
 
-    async def set_active_replay_id(self, conversation: ChatConversation, replay_id: str | None) -> None:
+    async def set_active_replay_id(
+        self, conversation: ChatConversation, replay_id: str | None
+    ) -> None:
         conversation.active_replay_id = replay_id
         conversation.updated_at = utcnow()
 

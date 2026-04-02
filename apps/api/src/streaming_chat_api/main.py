@@ -10,11 +10,12 @@ from streaming_chat_api.services.runtime import build_lifespan
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
+    is_dev = resolved_settings.app.is_dev
 
     app = FastAPI(title=resolved_settings.app.name, lifespan=build_lifespan(resolved_settings))
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=resolved_settings.app.cors_origins,
+        allow_origins=["*"] if is_dev else resolved_settings.app.cors_origins,
         allow_credentials=True,
         allow_methods=['*'],
         allow_headers=['*'],
