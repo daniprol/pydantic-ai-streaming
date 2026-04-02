@@ -2,7 +2,6 @@ import pytest
 
 from streaming_chat_api.models.entities import FlowType
 from streaming_chat_api.repositories.chat import ChatRepository
-from uuid import uuid4
 
 
 @pytest.mark.docker
@@ -93,7 +92,11 @@ async def test_postgres_chat_api_persists_messages_and_lists_conversation(
     postgres_api_client,
     chat_request_factory,
 ) -> None:
-    conversation_id = uuid4()
+    create_response = await postgres_api_client.post(
+        '/api/v1/flows/basic/conversations',
+        headers={'X-Session-Id': 'postgres-session'},
+    )
+    conversation_id = create_response.json()['conversation']['id']
 
     response = await postgres_api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',

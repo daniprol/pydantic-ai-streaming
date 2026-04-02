@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from streaming_chat_api.models.entities import (
@@ -20,17 +21,26 @@ class ChatRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_or_create_session(
-        self, client_id: str, user_agent: str | None = None
-    ) -> ChatSession:
+    async def get_session_by_client_id(self, client_id: str) -> ChatSession | None:
         result = await self.session.execute(
             select(ChatSession).where(ChatSession.client_id == client_id)
         )
-        chat_session = result.scalar_one_or_none()
+        return result.scalar_one_or_none()
+
+    async def get_or_create_session(
+        self, client_id: str, user_agent: str | None = None
+    ) -> ChatSession:
+        chat_session = await self.get_session_by_client_id(client_id)
         if chat_session is None:
             chat_session = ChatSession(client_id=client_id, user_agent=user_agent)
-            self.session.add(chat_session)
-            await self.session.flush()
+            try:
+                async with self.session.begin_nested():
+                    self.session.add(chat_session)
+                    await self.session.flush()
+            except IntegrityError:
+                # Another request created the session concurrently.
+                chat_session = await self.get_session_by_client_id(client_id)
+                assert chat_session is not None
         else:
             chat_session.updated_at = utcnow()
         return chat_session

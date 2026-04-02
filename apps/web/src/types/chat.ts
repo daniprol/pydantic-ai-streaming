@@ -10,11 +10,19 @@ export interface ConversationSummary {
   updated_at: string
 }
 
-export interface ConversationListResponse {
-  items: ConversationSummary[]
-  page: number
-  page_size: number
+export interface PaginatedResponse<T> {
+  items: T[]
+  skip: number
+  limit: number
   total: number
+}
+
+export interface ConversationListResponse extends PaginatedResponse<ConversationSummary> {
+  items: ConversationSummary[]
+}
+
+export interface ConversationCreateResponse {
+  conversation: ConversationSummary
 }
 
 export interface ConversationMessagesResponse {

@@ -1,10 +1,21 @@
 import type {
+  ConversationCreateResponse,
   ConversationListResponse,
   ConversationMessagesResponse,
   FlowType,
 } from '@/types/chat'
 
 const API_BASE = '/api/v1'
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message?: string) {
+    super(message ?? `Request failed with status ${status}`)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 async function apiFetch<T>(path: string, sessionId: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -17,17 +28,20 @@ async function apiFetch<T>(path: string, sessionId: string, init?: RequestInit):
   })
 
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`)
+    throw new ApiError(response.status)
   }
 
   return (await response.json()) as T
 }
 
 export function fetchConversations(flow: FlowType, sessionId: string) {
-  return apiFetch<ConversationListResponse>(
-    `/flows/${flow}/conversations?page=1&page_size=50&sort=updated_at&direction=desc`,
-    sessionId,
-  )
+  return apiFetch<ConversationListResponse>(`/flows/${flow}/conversations`, sessionId)
+}
+
+export function createConversation(flow: FlowType, sessionId: string) {
+  return apiFetch<ConversationCreateResponse>(`/flows/${flow}/conversations`, sessionId, {
+    method: 'POST',
+  })
 }
 
 export function fetchConversationMessages(

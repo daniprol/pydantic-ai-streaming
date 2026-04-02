@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@ai-sdk/react'
 
 import { Conversation, ConversationContent, ConversationScrollButton } from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
+import { chatQueryKeys } from '@/features/chat/api/queryKeys'
 import {
   PromptInput,
   PromptInputSubmit,
@@ -21,18 +21,25 @@ export function ChatPanel({
   conversationId,
   sessionId,
   initialData,
+  initialPrompt,
+  onInitialPromptConsumed,
+  onStartConversation,
 }: {
   flow: FlowType
   conversationId?: string
   sessionId: string
   initialData?: ConversationMessagesResponse
+  initialPrompt?: string
+  onInitialPromptConsumed?: () => void
+  onStartConversation?: (prompt: string) => Promise<void>
 }) {
   const [input, setInput] = useState('')
-  const [pendingDraft, setPendingDraft] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const navigate = useNavigate()
+  const initialPromptSentRef = useRef(false)
   const queryClient = useQueryClient()
-  const resolvedConversationId = conversationId ?? pendingDraft ?? `draft-${flow}`
+  const resolvedConversationId = conversationId ?? `draft-${flow}`
 
   const transport = createTransport({
     flow,
@@ -47,10 +54,10 @@ export function ChatPanel({
     transport,
     resume: flow === 'dbos-replay' && Boolean(initialData?.active_replay_id),
     onFinish: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['conversations', flow, sessionId] })
+      await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(flow, sessionId) })
       if (conversationId) {
         await queryClient.invalidateQueries({
-          queryKey: ['conversation-messages', flow, conversationId, sessionId],
+          queryKey: chatQueryKeys.conversationMessages(flow, conversationId, sessionId),
         })
       }
     },
@@ -61,32 +68,41 @@ export function ChatPanel({
   }, [conversationId])
 
   useEffect(() => {
-    if (!conversationId || !pendingDraft) {
+    if (!conversationId || !initialPrompt || initialPromptSentRef.current) {
       return
     }
-    const prompt = pendingDraft
-    setPendingDraft(null)
-    sendMessage({ text: prompt }).catch((sendError: unknown) => {
+
+    initialPromptSentRef.current = true
+    onInitialPromptConsumed?.()
+    sendMessage({ text: initialPrompt }).catch((sendError: unknown) => {
       console.error('Failed to send message', sendError)
     })
-  }, [conversationId, pendingDraft, sendMessage])
+  }, [conversationId, initialPrompt, onInitialPromptConsumed, sendMessage])
 
   function handleSubmit(event: SyntheticEvent) {
     event.preventDefault()
-    if (!input.trim()) {
+    const prompt = input.trim()
+    if (!prompt) {
       return
     }
 
     if (!conversationId) {
-      const newConversationId = crypto.randomUUID()
-      const prompt = input
-      setInput('')
-      setPendingDraft(prompt)
-      navigate(`/${flow}/conversations/${newConversationId}`)
+      setDraftError(null)
+      setIsCreatingConversation(true)
+      onStartConversation?.(prompt)
+        .then(() => {
+          setInput('')
+        })
+        .catch((sendError: unknown) => {
+          console.error('Failed to create conversation', sendError)
+          setDraftError('Unable to start a new conversation right now.')
+        })
+        .finally(() => {
+          setIsCreatingConversation(false)
+        })
       return
     }
 
-    const prompt = input
     setInput('')
     sendMessage({ text: prompt }).catch((sendError: unknown) => {
       console.error('Failed to send message', sendError)
@@ -117,9 +133,15 @@ export function ChatPanel({
             </div>
           ))}
           {status === 'submitted' && <Loader />}
+          {isCreatingConversation && <Loader />}
           {status === 'error' && error && (
             <div className="mx-4 my-2 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error.message}
+            </div>
+          )}
+          {draftError && (
+            <div className="mx-4 my-2 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {draftError}
             </div>
           )}
         </ConversationContent>
@@ -133,7 +155,11 @@ export function ChatPanel({
             value={input}
             onChange={(event) => {
               setInput(event.target.value)
+              if (draftError) {
+                setDraftError(null)
+              }
             }}
+            disabled={isCreatingConversation || status === 'submitted' || status === 'streaming'}
             placeholder="Ask about an order, service health, or support policy..."
           />
           <PromptInputToolbar>
@@ -142,7 +168,10 @@ export function ChatPanel({
                 ? 'Replay mode can reconnect to active streams.'
                 : 'Each flow uses the same chat UI with a different backend runner.'}
             </div>
-            <PromptInputSubmit disabled={!input.trim()} status={status} />
+            <PromptInputSubmit
+              disabled={!input.trim() || isCreatingConversation}
+              status={isCreatingConversation ? 'submitted' : status}
+            />
           </PromptInputToolbar>
         </PromptInput>
       </div>

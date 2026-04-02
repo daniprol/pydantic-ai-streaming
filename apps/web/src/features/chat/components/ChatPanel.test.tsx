@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react'
-import { vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ChatPanel } from '@/features/chat/components/ChatPanel'
 import { renderWithProviders } from '@/test/utils'

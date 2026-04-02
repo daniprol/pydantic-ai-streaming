@@ -37,7 +37,9 @@ async def test_chat_rejects_invalid_message_schema(api_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_rejects_invalid_deferred_tool_results_schema(api_client, chat_request_factory) -> None:
+async def test_chat_rejects_invalid_deferred_tool_results_schema(
+    api_client, chat_request_factory
+) -> None:
     response = await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={uuid4()}',
         json=chat_request_factory(
@@ -48,3 +50,14 @@ async def test_chat_rejects_invalid_deferred_tool_results_schema(api_client, cha
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_chat_requires_existing_conversation(api_client, chat_request_factory) -> None:
+    response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={uuid4()}',
+        json=chat_request_factory('hello'),
+        headers={'X-Session-Id': 'session-1'},
+    )
+
+    assert response.status_code == 404

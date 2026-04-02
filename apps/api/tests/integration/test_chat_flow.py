@@ -1,11 +1,13 @@
-from uuid import uuid4
-
 import pytest
 
 
 @pytest.mark.asyncio
 async def test_basic_flow_creates_and_lists_conversation(api_client, chat_request_factory) -> None:
-    conversation_id = uuid4()
+    create_response = await api_client.post(
+        '/api/v1/flows/basic/conversations',
+        headers={'X-Session-Id': 'session-1'},
+    )
+    conversation_id = create_response.json()['conversation']['id']
 
     response = await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
@@ -36,7 +38,11 @@ async def test_chat_accepts_deferred_tool_results_without_new_user_message(
     api_client,
     chat_request_factory,
 ) -> None:
-    conversation_id = uuid4()
+    create_response = await api_client.post(
+        '/api/v1/flows/basic/conversations',
+        headers={'X-Session-Id': 'session-2'},
+    )
+    conversation_id = create_response.json()['conversation']['id']
 
     await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
@@ -58,7 +64,11 @@ async def test_chat_accepts_deferred_tool_results_without_new_user_message(
 
 @pytest.mark.asyncio
 async def test_replay_flow_exposes_replay_endpoint(api_client, chat_request_factory) -> None:
-    conversation_id = uuid4()
+    create_response = await api_client.post(
+        '/api/v1/flows/dbos-replay/conversations',
+        headers={'X-Session-Id': 'session-3'},
+    )
+    conversation_id = create_response.json()['conversation']['id']
 
     await api_client.post(
         f'/api/v1/flows/dbos-replay/chat?conversation_id={conversation_id}',
@@ -73,3 +83,13 @@ async def test_replay_flow_exposes_replay_endpoint(api_client, chat_request_fact
 
     assert replay.status_code == 200
     assert replay.headers['content-type'].startswith('text/event-stream')
+
+
+@pytest.mark.asyncio
+async def test_missing_conversation_returns_404(api_client) -> None:
+    response = await api_client.get(
+        '/api/v1/flows/basic/conversations/87319ab1-c3d1-4e7b-a238-5b932aef2e9a/messages',
+        headers={'X-Session-Id': 'session-404'},
+    )
+
+    assert response.status_code == 404

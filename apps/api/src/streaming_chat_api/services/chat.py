@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +22,7 @@ from streaming_chat_api.models.entities import FlowType
 from streaming_chat_api.repositories.chat import ChatRepository
 from streaming_chat_api.schemas.chat import (
     ChatRequestEnvelope,
+    ConversationCreateResponse,
     ConversationListResponse,
     ConversationMessagesResponse,
     ConversationSummary,
@@ -99,17 +100,20 @@ class ChatFlowRunner:
                 detail='Request must include a new user message, a regenerate trigger, or deferred tool results.',
             )
 
-        session = await repository.get_or_create_session(
-            client_id=session_id,
-            user_agent=request.headers.get('user-agent'),
+        session = await repository.get_session_by_client_id(session_id)
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail='Conversation not found',
+            )
+        conversation = await repository.get_conversation(
+            session.id, conversation_id, self.flow_type
         )
-        conversation = await repository.get_or_create_conversation(
-            session_id=session.id,
-            conversation_id=conversation_id,
-            flow_type=self.flow_type,
-            title=_preview_from_message(new_message) if new_message else None,
-            preview=_preview_from_message(new_message) if new_message else None,
-        )
+        if conversation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail='Conversation not found',
+            )
         thread = await repository.get_or_create_thread(conversation.id, self.flow_type)
 
         history_rows = await repository.list_messages(conversation.id)
@@ -118,12 +122,18 @@ class ChatFlowRunner:
         if new_message is not None:
             incoming_model_messages = VercelAIAdapter.load_messages([new_message])
             next_sequence = await repository.next_sequence(conversation.id)
+            preview = _preview_from_message(new_message)
             await repository.append_message(
                 conversation_id=conversation.id,
                 role=new_message.role,
                 sequence=next_sequence,
                 ui_message_json=new_message.model_dump(mode='json'),
                 model_messages_json=_serialize_model_messages(incoming_model_messages),
+            )
+            await repository.update_conversation_preview(
+                conversation,
+                title=preview,
+                preview=preview,
             )
         await repository.update_thread_metadata(
             thread,
@@ -248,7 +258,14 @@ class ChatService:
         pagination: OffsetPaginationParams,
     ) -> ConversationListResponse:
         repository = ChatRepository(db)
-        chat_session = await repository.get_or_create_session(session_id)
+        chat_session = await repository.get_session_by_client_id(session_id)
+        if chat_session is None:
+            return ConversationListResponse(
+                items=[],
+                skip=pagination.skip,
+                limit=pagination.limit,
+                total=0,
+            )
         conversations, total = await repository.list_conversations(
             session_id=chat_session.id,
             flow_type=flow_type,
@@ -266,6 +283,27 @@ class ChatService:
             total=total,
         )
 
+    async def create_conversation(
+        self,
+        *,
+        db: AsyncSession,
+        session_id: str,
+        flow_type: FlowType,
+    ) -> ConversationCreateResponse:
+        repository = ChatRepository(db)
+        chat_session = await repository.get_or_create_session(session_id)
+        conversation = await repository.get_or_create_conversation(
+            session_id=chat_session.id,
+            conversation_id=uuid4(),
+            flow_type=flow_type,
+            title=None,
+            preview=None,
+        )
+        await db.commit()
+        return ConversationCreateResponse(
+            conversation=ConversationSummary.model_validate(conversation, from_attributes=True)
+        )
+
     async def get_messages(
         self,
         *,
@@ -275,16 +313,19 @@ class ChatService:
         conversation_id: UUID,
     ) -> ConversationMessagesResponse:
         repository = ChatRepository(db)
-        chat_session = await repository.get_or_create_session(session_id)
+        chat_session = await repository.get_session_by_client_id(session_id)
+        if chat_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail='Conversation not found',
+            )
         conversation = await repository.get_conversation(
             chat_session.id, conversation_id, flow_type
         )
         if conversation is None:
-            return ConversationMessagesResponse(
-                conversation_id=conversation_id,
-                flow_type=flow_type,
-                active_replay_id=None,
-                messages=[],
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail='Conversation not found',
             )
         messages = await repository.list_messages(conversation_id)
         await db.commit()

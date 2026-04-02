@@ -8,7 +8,7 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 const API_BASE_URL = process.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
+export default defineConfig(() => ({
   plugins: [react(), tailwindcss(), tsconfigPaths({ root: __dirname })],
   build: {
     assetsDir: 'assets',

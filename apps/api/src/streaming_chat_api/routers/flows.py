@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from streaming_chat_api.dependencies.resources import get_db_session, get_resources, get_session_id
 from streaming_chat_api.models.entities import FlowType
-from streaming_chat_api.schemas.chat import ConversationListResponse, ConversationMessagesResponse
+from streaming_chat_api.schemas.chat import (
+    ConversationCreateResponse,
+    ConversationListResponse,
+    ConversationMessagesResponse,
+)
 from streaming_chat_api.schemas.pagination import OffsetPaginationParams
 from streaming_chat_api.services.chat import ChatService
 from streaming_chat_api.services.runtime import AppResources
@@ -36,6 +40,20 @@ async def list_conversations(
         session_id=session_id,
         flow_type=flow,
         pagination=pagination,
+    )
+
+
+@router.post('/{flow}/conversations', response_model=ConversationCreateResponse, status_code=201)
+async def create_conversation(
+    flow: FlowType,
+    session_id: str = Depends(get_session_id),
+    db: AsyncSession = Depends(get_db_session),
+    service: ChatService = Depends(get_chat_service),
+) -> ConversationCreateResponse:
+    return await service.create_conversation(
+        db=db,
+        session_id=session_id,
+        flow_type=flow,
     )
 
 

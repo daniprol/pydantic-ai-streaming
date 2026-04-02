@@ -22,6 +22,7 @@ describe('createTransport', () => {
     })
 
     expect(request.headers['X-Session-Id']).toBe('session-1')
+    expect(request.body.trigger).toBe('submit-message')
     expect(request.body.id).toBe('request-1')
     expect(request.body.messages).toEqual([{ id: 'two' }])
     expect(request.body.deferredToolResults).toEqual({ approvals: { a: true } })

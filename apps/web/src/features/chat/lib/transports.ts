@@ -33,6 +33,7 @@ export function createTransport({
         },
         body: {
           ...body,
+          trigger: body?.trigger ?? 'submit-message',
           id,
           messages: latestMessage ? [latestMessage] : [],
         },

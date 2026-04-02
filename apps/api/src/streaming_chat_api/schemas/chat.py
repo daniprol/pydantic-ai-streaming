@@ -24,6 +24,10 @@ class ConversationListResponse(PaginatedResponse[ConversationSummary]):
     pass
 
 
+class ConversationCreateResponse(BaseModel):
+    conversation: ConversationSummary
+
+
 class ConversationMessagesResponse(BaseModel):
     conversation_id: UUID
     flow_type: FlowType
