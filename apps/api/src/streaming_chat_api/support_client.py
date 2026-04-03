@@ -34,8 +34,8 @@ class FakeSupportClient:
                 'url': 'https://example.com/help/streaming-delays',
             },
             {
-                'title': 'How session-based support chats work',
-                'summary': 'Overview of session history and reconnect support.',
-                'url': 'https://example.com/help/session-chats',
+                'title': 'How conversation history works',
+                'summary': 'Overview of conversation persistence and reconnect support.',
+                'url': 'https://example.com/help/conversation-history',
             },
         ]

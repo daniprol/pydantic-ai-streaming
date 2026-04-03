@@ -19,3 +19,4 @@ async def test_health_endpoints_report_status(app) -> None:
     assert status.status_code == 200
     assert status.json()['postgres']['ok'] is True
     assert status.json()['redis']['ok'] is True
+    assert status.json()['temporal']['ok'] is False

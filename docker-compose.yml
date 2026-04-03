@@ -34,7 +34,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ['uv', 'run', 'python', '-m', 'streaming_chat_api.temporal.worker']
+    command: ['uv', 'run', 'python', '-m', 'streaming_chat_api.temporal_worker']
     env_file:
       - apps/api/.env
     volumes:

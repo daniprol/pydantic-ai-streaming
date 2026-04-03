@@ -1,4 +1,3 @@
-
 import pytest
 
 
@@ -51,3 +50,24 @@ async def test_replay_endpoint_resumes_after_last_event_id(api_client, resources
     assert response.status_code == 200
     assert 'data: second' in body
     assert 'data: first' not in body
+
+
+@pytest.mark.asyncio
+async def test_dbos_replay_flow_clears_active_replay_id_after_completion(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/dbos-replay/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    response = await api_client.post(
+        f'/api/v1/flows/dbos-replay/chat?conversation_id={conversation_id}',
+        json=chat_request_factory('Replay this answer'),
+    )
+    messages = await api_client.get(
+        f'/api/v1/flows/dbos-replay/conversations/{conversation_id}/messages'
+    )
+
+    assert response.status_code == 200
+    assert messages.status_code == 200
+    assert messages.json()['active_replay_id'] is None

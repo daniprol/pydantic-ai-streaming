@@ -12,8 +12,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from streaming_chat_api.db.base import Base
-from streaming_chat_api.models import entities  # noqa: F401
+from streaming_chat_api.database import Base
+from streaming_chat_api import models  # noqa: F401
 
 
 API_ENV_FILE = Path(__file__).resolve().parents[1] / '.env'

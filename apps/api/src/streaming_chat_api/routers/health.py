@@ -2,19 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from streaming_chat_api.dependencies.resources import get_resources
-from streaming_chat_api.schemas.health import DependencyStatus, HealthStatusResponse
-from streaming_chat_api.services.runtime import (
-    AppResources,
-    check_postgres,
-    check_redis,
-    check_temporal,
-)
+from streaming_chat_api.dependencies import ResourcesDep
+from streaming_chat_api.schemas import DependencyStatus, HealthStatusResponse
+from streaming_chat_api.resources import check_postgres, check_redis, check_temporal
 
 
-router = APIRouter(prefix='/api/v1/health', tags=['health'])
+router = APIRouter(prefix='/health', tags=['health'])
 
 
 @router.get('/live')
@@ -23,7 +18,7 @@ async def live() -> dict[str, str]:
 
 
 @router.get('/ready')
-async def ready(resources: AppResources = Depends(get_resources)) -> dict[str, bool]:
+async def ready(resources: ResourcesDep) -> dict[str, bool]:
     postgres_ok, _ = await check_postgres(resources)
     redis_ok, _ = await check_redis(resources)
     temporal_ok, _ = await check_temporal(resources)
@@ -37,7 +32,7 @@ async def ready(resources: AppResources = Depends(get_resources)) -> dict[str, b
 
 
 @router.get('/status', response_model=HealthStatusResponse)
-async def status(resources: AppResources = Depends(get_resources)) -> HealthStatusResponse:
+async def status(resources: ResourcesDep) -> HealthStatusResponse:
     postgres_ok, postgres_detail = await check_postgres(resources)
     redis_ok, redis_detail = await check_redis(resources)
     temporal_ok, temporal_detail = await check_temporal(resources)

@@ -1,51 +1,115 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
 
 import fakeredis.aioredis
 import httpx
 import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from streaming_chat_api.agents.registry import AgentDependencies, build_support_agent
-from streaming_chat_api.clients.fake_support import FakeSupportClient
-from streaming_chat_api.config.settings import Settings, get_settings
-from streaming_chat_api.db.base import Base
+from streaming_chat_api.agents import AgentDependencies, build_support_agent
+from streaming_chat_api.database import Base, create_engine, create_session_factory
 from streaming_chat_api.main import create_app
-from streaming_chat_api.models.entities import FlowType
-from streaming_chat_api.repositories.chat import ChatRepository
-from streaming_chat_api.services.replay import ReplayStreamBroker
-from streaming_chat_api.services.runtime import AgentRegistry, AppResources
+from streaming_chat_api.models import FlowType
+from streaming_chat_api.repository import ConversationRepository
+from streaming_chat_api.replay import ReplayStreamBroker
+from streaming_chat_api.resources import AppResources, ChatAgents
+from streaming_chat_api.settings import API_ENV_FILE, Settings, get_settings
+from streaming_chat_api.support_client import FakeSupportClient
+
+
+def build_settings(**overrides) -> Settings:
+    values = {
+        'app_env': 'test',
+        'app_name': 'streaming-chat-api-test',
+        'app_cors_origins': ['http://localhost:5173'],
+        'redis_url': 'redis://unused',
+        'use_test_model': True,
+        **overrides,
+    }
+    return Settings(**values)
+
+
+async def build_test_resources(settings: Settings) -> AsyncIterator[AppResources]:
+    engine: AsyncEngine = create_engine(settings)
+    session_factory = create_session_factory(engine)
+    attempts = 10 if settings.database_url.startswith('postgresql') else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.drop_all)
+                await connection.run_sync(Base.metadata.create_all)
+            break
+        except Exception:
+            if attempt == attempts:
+                raise
+            await asyncio.sleep(1)
+
+    http_client = httpx.AsyncClient()
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    support_client = FakeSupportClient(http_client)
+    support_agent = build_support_agent(settings)
+    resources = AppResources(
+        settings=settings,
+        engine=engine,
+        session_factory=session_factory,
+        http_client=http_client,
+        redis=fake_redis,
+        temporal_client=None,
+        support_client=support_client,
+        agents=ChatAgents(
+            basic=support_agent,
+            dbos=support_agent,
+            temporal=support_agent,
+            dbos_replay=support_agent,
+        ),
+        replay_broker=ReplayStreamBroker(fake_redis, settings),
+        started_at=datetime.now(timezone.utc),
+        dbos_initialized=False,
+    )
+
+    try:
+        yield resources
+    finally:
+        await fake_redis.aclose()
+        await http_client.aclose()
+        await engine.dispose()
 
 
 @pytest.fixture
 def test_settings(tmp_path: Path) -> Settings:
     database_path = tmp_path / 'test.db'
-    return Settings(
-        app_env='test',
-        app_name='streaming-chat-api-test',
-        database_url=f'sqlite+aiosqlite:///{database_path}',
-        redis_url='redis://unused',
-        use_test_model=True,
-        app_cors_origins=['http://localhost:5173'],
-    )
+    return build_settings(database_url=f'sqlite+aiosqlite:///{database_path}')
 
 
 @pytest.fixture
 def llm_settings() -> Settings:
     get_settings.cache_clear()
     return Settings()
+
+
+@pytest.fixture
+def real_test_settings(tmp_path: Path, llm_settings: Settings) -> Settings:
+    if llm_settings.use_test_model or not llm_settings.llm_configured:
+        pytest.skip('Real LLM settings are not configured in apps/api/.env')
+
+    database_path = tmp_path / 'real-llm.db'
+    return llm_settings.model_copy(
+        update={
+            'app_env': 'test',
+            'app_name': 'streaming-chat-api-real-llm-test',
+            'app_cors_origins': ['http://localhost:5173'],
+            'database_url': f'sqlite+aiosqlite:///{database_path}',
+            'redis_url': 'redis://unused',
+        }
+    )
 
 
 @pytest.fixture(scope='session')
@@ -65,41 +129,14 @@ def docker_setup() -> list[str]:
 
 @pytest.fixture
 async def resources(test_settings: Settings) -> AsyncIterator[AppResources]:
-    engine: AsyncEngine = create_async_engine(test_settings.database.url, future=True)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    async for resource_bundle in build_test_resources(test_settings):
+        yield resource_bundle
 
-    http_client = httpx.AsyncClient()
-    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    support_client = FakeSupportClient(http_client)
-    support_agent = build_support_agent(test_settings)
-    replay_broker = ReplayStreamBroker(fake_redis, test_settings)
 
-    resources = AppResources(
-        settings=test_settings,
-        engine=engine,
-        session_factory=session_factory,
-        http_client=http_client,
-        redis=fake_redis,
-        temporal_client=None,
-        support_client=support_client,
-        agents=AgentRegistry(
-            basic=support_agent,
-            dbos=support_agent,
-            temporal=support_agent,
-            dbos_replay=support_agent,
-        ),
-        replay_broker=replay_broker,
-        started_at=datetime.now(timezone.utc),
-        dbos_initialized=False,
-    )
-
-    yield resources
-
-    await fake_redis.aclose()
-    await http_client.aclose()
-    await engine.dispose()
+@pytest.fixture
+async def real_resources(real_test_settings: Settings) -> AsyncIterator[AppResources]:
+    async for resource_bundle in build_test_resources(real_test_settings):
+        yield resource_bundle
 
 
 @pytest.fixture(scope='session')
@@ -110,60 +147,16 @@ def postgres_dsn(docker_services) -> str:
 
 @pytest.fixture
 def postgres_settings(postgres_dsn: str) -> Settings:
-    return Settings(
-        app_env='test',
+    return build_settings(
         app_name='streaming-chat-api-postgres-test',
         database_url=postgres_dsn,
-        redis_url='redis://unused',
-        use_test_model=True,
-        app_cors_origins=['http://localhost:5173'],
     )
 
 
 @pytest.fixture
 async def postgres_resources(postgres_settings: Settings) -> AsyncIterator[AppResources]:
-    engine: AsyncEngine = create_async_engine(postgres_settings.database.url, future=True)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    http_client = httpx.AsyncClient()
-    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    support_client = FakeSupportClient(http_client)
-    support_agent = build_support_agent(postgres_settings)
-    replay_broker = ReplayStreamBroker(fake_redis, postgres_settings)
-
-    resources = AppResources(
-        settings=postgres_settings,
-        engine=engine,
-        session_factory=session_factory,
-        http_client=http_client,
-        redis=fake_redis,
-        temporal_client=None,
-        support_client=support_client,
-        agents=AgentRegistry(
-            basic=support_agent,
-            dbos=support_agent,
-            temporal=support_agent,
-            dbos_replay=support_agent,
-        ),
-        replay_broker=replay_broker,
-        started_at=datetime.now(timezone.utc),
-        dbos_initialized=False,
-    )
-
-    yield resources
-
-    await fake_redis.aclose()
-    await http_client.aclose()
-    await engine.dispose()
-
-
-@pytest.fixture
-async def postgres_db_session(postgres_resources: AppResources) -> AsyncIterator[AsyncSession]:
-    async with postgres_resources.session_factory() as session:
-        yield session
+    async for resource_bundle in build_test_resources(postgres_settings):
+        yield resource_bundle
 
 
 @pytest.fixture
@@ -182,8 +175,27 @@ async def app(resources: AppResources, test_settings: Settings) -> AsyncIterator
 
 
 @pytest.fixture
+async def real_app(
+    real_resources: AppResources,
+    real_test_settings: Settings,
+) -> AsyncIterator[FastAPI]:
+    get_settings.cache_clear()
+    app = create_app(real_test_settings)
+
+    @asynccontextmanager
+    async def test_lifespan(_: FastAPI):
+        app.state.resources = real_resources
+        app.state.settings = real_test_settings
+        yield
+
+    app.router.lifespan_context = test_lifespan
+    yield app
+
+
+@pytest.fixture
 async def postgres_app(
-    postgres_resources: AppResources, postgres_settings: Settings
+    postgres_resources: AppResources,
+    postgres_settings: Settings,
 ) -> AsyncIterator[FastAPI]:
     get_settings.cache_clear()
     app = create_app(postgres_settings)
@@ -205,10 +217,24 @@ async def db_session(resources: AppResources) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
+async def postgres_db_session(postgres_resources: AppResources) -> AsyncIterator[AsyncSession]:
+    async with postgres_resources.session_factory() as session:
+        yield session
+
+
+@pytest.fixture
 async def api_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+        async with AsyncClient(transport=transport, base_url='http://testserver') as client:
+            yield client
+
+
+@pytest.fixture
+async def real_api_client(real_app: FastAPI) -> AsyncIterator[AsyncClient]:
+    async with LifespanManager(real_app):
+        transport = httpx.ASGITransport(app=real_app)
+        async with AsyncClient(transport=transport, base_url='http://testserver') as client:
             yield client
 
 
@@ -216,7 +242,7 @@ async def api_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 async def postgres_api_client(postgres_app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with LifespanManager(postgres_app):
         transport = httpx.ASGITransport(app=postgres_app)
-        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+        async with AsyncClient(transport=transport, base_url='http://testserver') as client:
             yield client
 
 
@@ -235,6 +261,8 @@ def chat_request_factory():
             'id': request_id,
             'messages': [],
         }
+        if message_id is not None:
+            body['messageId'] = message_id
         if text is not None:
             body['messages'] = [
                 {
@@ -251,15 +279,66 @@ def chat_request_factory():
 
 
 @pytest.fixture
-def agent_deps_factory(resources: AppResources):
-    def factory(
+def repository_factory():
+    def factory(session: AsyncSession) -> ConversationRepository:
+        return ConversationRepository(session)
+
+    return factory
+
+
+@pytest.fixture
+def conversation_factory(repository_factory):
+    async def factory(
+        session: AsyncSession,
         *,
-        conversation_id: str = 'conversation-1',
-        flow_type: str = FlowType.BASIC.value,
-    ) -> AgentDependencies:
+        flow_type: FlowType = FlowType.BASIC,
+        title: str | None = None,
+        preview: str | None = None,
+        active_replay_id: str | None = None,
+    ):
+        repository = repository_factory(session)
+        conversation = await repository.create_conversation(flow_type)
+        if title or preview:
+            await repository.update_conversation_preview(
+                conversation,
+                title=title,
+                preview=preview,
+            )
+        if active_replay_id is not None:
+            await repository.set_active_replay_id(conversation, active_replay_id)
+        return conversation
+
+    return factory
+
+
+@pytest.fixture
+def message_factory(repository_factory):
+    async def factory(
+        session: AsyncSession,
+        *,
+        conversation_id,
+        role: str = 'user',
+        sequence: int = 1,
+        ui_message_json: dict | None = None,
+        model_messages_json: list | None = None,
+    ):
+        repository = repository_factory(session)
+        return await repository.append_message(
+            conversation_id=conversation_id,
+            role=role,
+            sequence=sequence,
+            ui_message_json=ui_message_json or {'id': str(sequence), 'role': role},
+            model_messages_json=model_messages_json or [],
+        )
+
+    return factory
+
+
+@pytest.fixture
+def agent_deps_factory(resources: AppResources):
+    def factory(*, conversation_id: str = 'conversation-1') -> AgentDependencies:
         return AgentDependencies(
             conversation_id=conversation_id,
-            flow_type=flow_type,
             support_client=resources.support_client,
         )
 
@@ -278,64 +357,4 @@ def real_support_agent(llm_settings: Settings):
     return build_support_agent(llm_settings)
 
 
-@pytest.fixture
-def repository_factory():
-    def factory(session: AsyncSession) -> ChatRepository:
-        return ChatRepository(session)
-
-    return factory
-
-
-@pytest.fixture
-def session_factory_fixture(repository_factory):
-    async def factory(session: AsyncSession, *, client_id: str = 'client-1'):
-        repository = repository_factory(session)
-        return await repository.get_or_create_session(client_id)
-
-    return factory
-
-
-@pytest.fixture
-def conversation_factory(repository_factory):
-    async def factory(
-        session: AsyncSession,
-        *,
-        session_id: UUID,
-        conversation_id: UUID | None = None,
-        flow_type: FlowType = FlowType.BASIC,
-        title: str | None = 'Conversation',
-        preview: str | None = 'Conversation',
-    ):
-        repository = repository_factory(session)
-        return await repository.get_or_create_conversation(
-            session_id=session_id,
-            conversation_id=conversation_id or uuid4(),
-            flow_type=flow_type,
-            title=title,
-            preview=preview,
-        )
-
-    return factory
-
-
-@pytest.fixture
-def message_factory(repository_factory):
-    async def factory(
-        session: AsyncSession,
-        *,
-        conversation_id: UUID,
-        role: str = 'user',
-        sequence: int = 1,
-        ui_message_json: dict | None = None,
-        model_messages_json: list | None = None,
-    ):
-        repository = repository_factory(session)
-        return await repository.append_message(
-            conversation_id=conversation_id,
-            role=role,
-            sequence=sequence,
-            ui_message_json=ui_message_json or {'id': str(sequence), 'role': role},
-            model_messages_json=model_messages_json or [],
-        )
-
-    return factory
+__all__ = ['API_ENV_FILE', 'build_settings']

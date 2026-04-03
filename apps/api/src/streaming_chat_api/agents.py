@@ -10,8 +10,8 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from streaming_chat_api.clients.fake_support import FakeSupportClient
-from streaming_chat_api.config.settings import Settings
+from streaming_chat_api.settings import Settings
+from streaming_chat_api.support_client import FakeSupportClient
 
 
 PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
@@ -20,7 +20,6 @@ PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
 @dataclass(slots=True)
 class AgentDependencies:
     conversation_id: str
-    flow_type: str
     support_client: FakeSupportClient
 
 
@@ -29,16 +28,16 @@ def _load_prompt(filename: str) -> str:
 
 
 def build_model(settings: Settings):
-    if settings.llm.use_test_model:
+    if settings.use_test_model:
         return TestModel()
 
     provider = AzureProvider(
-        azure_endpoint=settings.llm.azure_endpoint,
-        api_key=settings.llm.azure_api_key,
-        api_version=settings.llm.openai_api_version,
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.openai_api_version,
     )
     return OpenAIChatModel(
-        settings.llm.azure_model,
+        settings.azure_openai_model,
         provider=cast(OpenAIProvider, provider),
     )
 

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import redis.asyncio as redis
 
-from streaming_chat_api.config.settings import Settings
+from streaming_chat_api.settings import Settings
 
 
 class ReplayStreamBroker:
@@ -15,15 +15,17 @@ class ReplayStreamBroker:
     async def append_chunk(self, replay_id: str, chunk: str) -> str:
         stream_key = self._stream_key(replay_id)
         message_id = await self.redis.xadd(stream_key, {'kind': 'chunk', 'payload': chunk})
-        await self.redis.expire(stream_key, self.settings.redis.replay_stream_ttl_seconds)
+        await self.redis.expire(stream_key, self.settings.replay_stream_ttl_seconds)
         return message_id
 
     async def append_complete(self, replay_id: str) -> None:
         stream_key = self._stream_key(replay_id)
         await self.redis.xadd(stream_key, {'kind': 'complete', 'payload': ''})
-        await self.redis.expire(stream_key, self.settings.redis.replay_stream_ttl_seconds)
+        await self.redis.expire(stream_key, self.settings.replay_stream_ttl_seconds)
 
-    async def live_stream(self, replay_id: str, encoded_stream: AsyncIterator[str]) -> AsyncIterator[str]:
+    async def live_stream(
+        self, replay_id: str, encoded_stream: AsyncIterator[str]
+    ) -> AsyncIterator[str]:
         async for chunk in encoded_stream:
             message_id = await self.append_chunk(replay_id, chunk)
             yield self._format_sse(message_id, chunk)

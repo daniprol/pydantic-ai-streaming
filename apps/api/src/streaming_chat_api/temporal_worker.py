@@ -7,9 +7,9 @@ from temporalio.worker import Worker
 
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 
-from streaming_chat_api.config.settings import get_settings
-from streaming_chat_api.services.runtime import build_agents
-from streaming_chat_api.temporal.workflows import SupportWorkflow
+from streaming_chat_api.resources import build_agents
+from streaming_chat_api.settings import get_settings
+from streaming_chat_api.temporal_workflow import SupportWorkflow
 
 
 async def main() -> None:
@@ -18,12 +18,12 @@ async def main() -> None:
     SupportWorkflow.__pydantic_ai_agents__ = (agents.temporal,)
 
     client = await Client.connect(
-        settings.temporal.target_host,
-        namespace=settings.temporal.namespace,
+        settings.temporal_target_host,
+        namespace=settings.temporal_namespace,
     )
     worker = Worker(
         client,
-        task_queue=settings.temporal.task_queue,
+        task_queue=settings.temporal_task_queue,
         workflows=[SupportWorkflow],
         plugins=[PydanticAIPlugin()],
     )

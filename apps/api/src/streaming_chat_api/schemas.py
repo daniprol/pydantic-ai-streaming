@@ -1,16 +1,32 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from streaming_chat_api.models.entities import FlowType
-from streaming_chat_api.schemas.pagination import PaginatedResponse
+from streaming_chat_api.models import FlowType
+
+
+T = TypeVar('T')
+
+
+class OffsetPaginationParams(BaseModel):
+    skip: int = Field(default=0, ge=0)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    skip: int
+    limit: int
+    total: int
 
 
 class ConversationSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     flow_type: FlowType
     title: str | None
@@ -53,3 +69,17 @@ class ChatRequestEnvelope(BaseModel):
         default=None,
         alias='deferredToolResults',
     )
+
+
+class DependencyStatus(BaseModel):
+    ok: bool
+    detail: str
+
+
+class HealthStatusResponse(BaseModel):
+    uptime_seconds: float
+    postgres: DependencyStatus
+    redis: DependencyStatus
+    temporal: DependencyStatus
+    dbos: DependencyStatus
+    llm: DependencyStatus

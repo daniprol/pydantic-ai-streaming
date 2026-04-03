@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from streaming_chat_api.config.settings import API_ENV_FILE, Settings
+from streaming_chat_api.settings import API_ENV_FILE, Settings
 
 
 def build_settings(**overrides) -> Settings:
@@ -22,7 +22,7 @@ def test_settings_load_api_env_file_location() -> None:
 
 def test_settings_support_test_model_flag() -> None:
     settings = build_settings()
-    assert settings.llm.use_test_model is True
+    assert settings.use_test_model is True
     assert settings.llm_configured is False
 
 
@@ -73,13 +73,15 @@ def test_settings_reject_invalid_json_like_env_cors_origins(
 
 
 @pytest.mark.parametrize(
-    ('app_env', 'expected'),
-    [
-        ('development', True),
-        ('test', True),
-        ('production', False),
-    ],
+    ('app_env', 'expected'), [('development', True), ('test', True), ('production', False)]
 )
-def test_settings_app_config_is_dev(app_env: str, expected: bool) -> None:
+def test_settings_is_dev_property(app_env: str, expected: bool) -> None:
     settings = build_settings(app_env=app_env)
-    assert settings.app.is_dev is expected
+    assert settings.is_dev is expected
+
+
+def test_settings_normalize_local_postgres_host_for_local_execution() -> None:
+    settings = build_settings(
+        database_url='postgresql+asyncpg://postgres:postgres@postgres:5432/app'
+    )
+    assert '127.0.0.1' in settings.database_url

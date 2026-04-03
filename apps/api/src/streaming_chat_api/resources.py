@@ -12,16 +12,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from temporalio.client import Client as TemporalClient
 
-from streaming_chat_api.agents.registry import build_support_agent
-from streaming_chat_api.clients.fake_support import FakeSupportClient
-from streaming_chat_api.config.settings import Settings, get_settings
-from streaming_chat_api.db.base import Base
-from streaming_chat_api.db.session import create_engine_from_settings
-from streaming_chat_api.services.replay import ReplayStreamBroker
+from streaming_chat_api.agents import build_support_agent
+from streaming_chat_api.database import create_engine, create_session_factory
+from streaming_chat_api.replay import ReplayStreamBroker
+from streaming_chat_api.settings import Settings, get_settings
+from streaming_chat_api.support_client import FakeSupportClient
 
 
 @dataclass(slots=True)
-class AgentRegistry:
+class ChatAgents:
     basic: object
     dbos: object
     temporal: object
@@ -37,18 +36,18 @@ class AppResources:
     redis: redis.Redis
     temporal_client: TemporalClient | None
     support_client: FakeSupportClient
-    agents: AgentRegistry
+    agents: ChatAgents
     replay_broker: ReplayStreamBroker
     started_at: datetime
     dbos_initialized: bool
 
 
-def build_agents(settings: Settings) -> AgentRegistry:
+def build_agents(settings: Settings) -> ChatAgents:
     from pydantic_ai.durable_exec.dbos import DBOSAgent
     from pydantic_ai.durable_exec.temporal import TemporalAgent
 
     support_agent = build_support_agent(settings)
-    return AgentRegistry(
+    return ChatAgents(
         basic=support_agent,
         dbos=DBOSAgent(support_agent, name='support-assistant-dbos'),
         temporal=TemporalAgent(support_agent, name='support-assistant-temporal'),
@@ -57,19 +56,19 @@ def build_agents(settings: Settings) -> AgentRegistry:
 
 
 async def create_resources(settings: Settings | None = None) -> AppResources:
-    settings = settings or get_settings()
-    engine = create_engine_from_settings(settings)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    resolved_settings = settings or get_settings()
+    engine = create_engine(resolved_settings)
+    session_factory = create_session_factory(engine)
     http_client = httpx.AsyncClient(timeout=30.0)
-    redis_client = redis.from_url(settings.redis.url, decode_responses=True)
+    redis_client = redis.from_url(resolved_settings.redis_url, decode_responses=True)
     support_client = FakeSupportClient(http_client)
-    agents = build_agents(settings)
+    agents = build_agents(resolved_settings)
 
     temporal_client: TemporalClient | None = None
     try:
         temporal_client = await TemporalClient.connect(
-            settings.temporal.target_host,
-            namespace=settings.temporal.namespace,
+            resolved_settings.temporal_target_host,
+            namespace=resolved_settings.temporal_namespace,
         )
     except Exception:
         temporal_client = None
@@ -78,8 +77,8 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
     try:
         DBOS(
             config={
-                'name': settings.app.name,
-                'system_database_url': settings.dbos.system_database_url,
+                'name': resolved_settings.app_name,
+                'system_database_url': resolved_settings.dbos_system_database_url,
             }
         )
         DBOS.launch()
@@ -87,14 +86,8 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
     except Exception:
         dbos_initialized = False
 
-    if settings.database.url.startswith('sqlite'):
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-
-    replay_broker = ReplayStreamBroker(redis_client, settings)
-
     return AppResources(
-        settings=settings,
+        settings=resolved_settings,
         engine=engine,
         session_factory=session_factory,
         http_client=http_client,
@@ -102,7 +95,7 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
         temporal_client=temporal_client,
         support_client=support_client,
         agents=agents,
-        replay_broker=replay_broker,
+        replay_broker=ReplayStreamBroker(redis_client, resolved_settings),
         started_at=datetime.now(timezone.utc),
         dbos_initialized=dbos_initialized,
     )
@@ -126,9 +119,6 @@ def build_lifespan(settings: Settings | None = None):
             await close_resources(resources)
 
     return lifespan
-
-
-lifespan = build_lifespan()
 
 
 async def check_postgres(resources: AppResources) -> tuple[bool, str]:

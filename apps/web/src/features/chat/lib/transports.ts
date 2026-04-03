@@ -1,5 +1,6 @@
 import { DefaultChatTransport } from 'ai'
 
+import { apiUrl } from '@/features/chat/api/base'
 import type { FlowType, UIConversationMessage } from '@/types/chat'
 
 interface TransportOptions {
@@ -10,7 +11,7 @@ interface TransportOptions {
 
 export function createTransport({ flow, conversationId, replayId }: TransportOptions) {
   return new DefaultChatTransport({
-    api: `/api/v1/flows/${flow}/chat?conversation_id=${conversationId}`,
+    api: apiUrl(`/flows/${flow}/chat?conversation_id=${conversationId}`),
     prepareSendMessagesRequest: ({
       messages,
       body,
@@ -32,7 +33,7 @@ export function createTransport({ flow, conversationId, replayId }: TransportOpt
     },
     prepareReconnectToStreamRequest: () => {
       return {
-        api: `/api/v1/flows/dbos-replay/streams/${replayId ?? conversationId}/replay`,
+        api: apiUrl(`/flows/dbos-replay/streams/${replayId ?? conversationId}/replay`),
       }
     },
   })

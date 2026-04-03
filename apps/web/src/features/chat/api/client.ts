@@ -5,7 +5,7 @@ import type {
   FlowType,
 } from '@/types/chat'
 
-const API_BASE = '/api/v1'
+import { apiUrl } from '@/features/chat/api/base'
 
 export class ApiError extends Error {
   status: number
@@ -18,7 +18,7 @@ export class ApiError extends Error {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',

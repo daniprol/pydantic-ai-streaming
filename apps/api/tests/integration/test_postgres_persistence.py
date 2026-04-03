@@ -1,21 +1,18 @@
 import pytest
 
-from streaming_chat_api.models.entities import FlowType
-from streaming_chat_api.repositories.chat import ChatRepository
+from streaming_chat_api.models import FlowType
+from streaming_chat_api.repository import ConversationRepository
 
 
 @pytest.mark.docker
 @pytest.mark.asyncio
 async def test_postgres_repository_persists_session_conversation_and_messages(
     postgres_db_session,
-    session_factory_fixture,
     conversation_factory,
     message_factory,
 ) -> None:
-    session = await session_factory_fixture(postgres_db_session, client_id='postgres-client')
     conversation = await conversation_factory(
         postgres_db_session,
-        session_id=session.id,
         flow_type=FlowType.BASIC,
         title='Persist me',
         preview='Persist me',
@@ -36,7 +33,7 @@ async def test_postgres_repository_persists_session_conversation_and_messages(
     )
     await postgres_db_session.commit()
 
-    repository = ChatRepository(postgres_db_session)
+    repository = ConversationRepository(postgres_db_session)
     conversations, total = await repository.list_conversations(
         flow_type=FlowType.BASIC,
         skip=0,
@@ -53,27 +50,23 @@ async def test_postgres_repository_persists_session_conversation_and_messages(
 @pytest.mark.asyncio
 async def test_postgres_repository_keeps_flow_histories_partitioned(
     postgres_db_session,
-    session_factory_fixture,
     conversation_factory,
 ) -> None:
-    session = await session_factory_fixture(postgres_db_session, client_id='partition-client')
     await conversation_factory(
         postgres_db_session,
-        session_id=session.id,
         flow_type=FlowType.BASIC,
         title='Basic',
         preview='Basic',
     )
     await conversation_factory(
         postgres_db_session,
-        session_id=session.id,
         flow_type=FlowType.DBOS,
         title='Dbos',
         preview='Dbos',
     )
     await postgres_db_session.commit()
 
-    repository = ChatRepository(postgres_db_session)
+    repository = ConversationRepository(postgres_db_session)
     basic_conversations, total = await repository.list_conversations(
         flow_type=FlowType.BASIC,
         skip=0,
@@ -103,7 +96,36 @@ async def test_postgres_chat_api_persists_messages_and_lists_conversation(
     )
 
     assert response.status_code == 200
+    assert response.headers['x-vercel-ai-ui-message-stream'] == 'v1'
     assert conversations.status_code == 200
     assert conversations.json()['total'] == 1
     assert conversations.json()['items'][0]['id'] == str(conversation_id)
-    assert len(messages.json()['messages']) >= 2
+    assert [message['role'] for message in messages.json()['messages']] == [
+        'user',
+        'assistant',
+        'assistant',
+    ]
+
+
+@pytest.mark.docker
+@pytest.mark.asyncio
+async def test_postgres_delete_conversation_removes_persisted_messages(
+    postgres_api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await postgres_api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+    await postgres_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory('Delete in postgres'),
+    )
+
+    delete_response = await postgres_api_client.delete(
+        f'/api/v1/flows/basic/conversations/{conversation_id}'
+    )
+    messages = await postgres_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert delete_response.status_code == 204
+    assert messages.status_code == 404
