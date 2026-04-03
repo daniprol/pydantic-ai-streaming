@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@ai-sdk/react'
 
-import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation'
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
 import { chatQueryKeys } from '@/features/chat/api/queryKeys'
 import {
@@ -57,13 +62,10 @@ export function ChatPanel({
     messages: (initialData?.messages ?? []) as never,
     transport,
     resume: flow === 'dbos-replay' && Boolean(initialData?.active_replay_id),
-    onFinish: async () => {
-      await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(flow) })
-      if (conversationId) {
-        await queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.conversationMessages(flow, conversationId),
-        })
-      }
+    onFinish: () => {
+      queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(flow) }).catch((error: unknown) => {
+        console.error('Failed to refresh conversations', error)
+      })
     },
   })
 
@@ -83,7 +85,7 @@ export function ChatPanel({
     })
   }, [conversationId, initialPrompt, onInitialPromptConsumed, sendMessage])
 
-  function handleSubmit(_: PromptInputMessage, event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(_: PromptInputMessage, event: { preventDefault(): void }) {
     event.preventDefault()
     const prompt = input.trim()
     if (!prompt) {
@@ -191,8 +193,18 @@ export function ChatPanel({
                 </PromptInputActionMenu>
               </PromptInputTools>
               <PromptInputSubmit
-                disabled={isCreatingConversation || (!input.trim() && status !== 'submitted' && status !== 'streaming')}
-                onStop={conversationId ? stop : undefined}
+                disabled={
+                  isCreatingConversation || (!input.trim() && status !== 'submitted' && status !== 'streaming')
+                }
+                onStop={
+                  conversationId
+                    ? () => {
+                        stop().catch((stopError: unknown) => {
+                          console.error('Failed to stop stream', stopError)
+                        })
+                      }
+                    : undefined
+                }
                 status={isCreatingConversation ? 'submitted' : status}
               />
             </PromptInputFooter>

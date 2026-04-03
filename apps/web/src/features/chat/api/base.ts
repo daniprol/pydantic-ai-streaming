@@ -1,4 +1,5 @@
-const runtimeApiOrigin = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
+const configuredApiOrigin = import.meta.env.VITE_API_BASE_URL as string | undefined
+const runtimeApiOrigin = typeof configuredApiOrigin === 'string' ? configuredApiOrigin.replace(/\/$/, '') : ''
 
 export const API_BASE = runtimeApiOrigin ? `${runtimeApiOrigin}/api/v1` : '/api/v1'
 

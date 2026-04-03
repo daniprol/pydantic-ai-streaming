@@ -18,12 +18,12 @@ export class ApiError extends Error {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/json')
+
   const response = await fetch(apiUrl(path), {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -44,9 +44,7 @@ export function createConversation(flow: FlowType) {
 }
 
 export function deleteConversation(flow: FlowType, conversationId: string) {
-  return apiFetch<void>(`/flows/${flow}/conversations/${conversationId}`, {
-    method: 'DELETE',
-  })
+  return apiFetch<null>(`/flows/${flow}/conversations/${conversationId}`, { method: 'DELETE' }).then(() => undefined)
 }
 
 export function fetchConversationMessages(flow: FlowType, conversationId: string) {
