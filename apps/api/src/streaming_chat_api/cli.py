@@ -111,6 +111,31 @@ class HttpChatBackend:
                 yield event
 
 
+def format_http_error(error: httpx.HTTPStatusError) -> str:
+    response = error.response
+    message = response.text.strip()
+    try:
+        payload = response.json()
+        if isinstance(payload, dict) and isinstance(payload.get('detail'), str):
+            message = payload['detail']
+    except ValueError:
+        pass
+
+    if not message:
+        message = response.reason_phrase or 'Request failed'
+    return f'HTTP {response.status_code}: {message}'
+
+
+def print_api_error(console: Console, error: Exception) -> None:
+    if isinstance(error, httpx.HTTPStatusError):
+        message = format_http_error(error)
+    elif isinstance(error, httpx.RequestError):
+        message = f'Request failed: {error}'
+    else:
+        message = str(error) or error.__class__.__name__
+    console.print(Text(message, style='bold red'))
+
+
 def _iter_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
     data_lines: list[str] = []
     for line in lines:
@@ -349,11 +374,19 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
         if prompt in {'/exit', '/quit'}:
             return
         if prompt == '/history':
-            state.messages = backend.load_messages(state.flow, state.id)
+            try:
+                state.messages = backend.load_messages(state.flow, state.id)
+            except httpx.HTTPError as error:
+                print_api_error(console, error)
+                continue
             print_history(console, state)
             continue
         if prompt == '/new':
-            state.id = backend.create_conversation(state.flow)
+            try:
+                state.id = backend.create_conversation(state.flow)
+            except httpx.HTTPError as error:
+                print_api_error(console, error)
+                continue
             state.messages = []
             console.print(Text(f'Created conversation: {state.id}', style='bold green'))
             continue
@@ -361,10 +394,13 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
         user_message = build_message(prompt)
 
         printer = StreamPrinter(console)
-        for event in backend.stream_chat(state.flow, state.id, [user_message]):
-            printer.handle_event(event)
-
-        state.messages = backend.load_messages(state.flow, state.id)
+        try:
+            for event in backend.stream_chat(state.flow, state.id, [user_message]):
+                printer.handle_event(event)
+            state.messages = backend.load_messages(state.flow, state.id)
+        except httpx.HTTPError as error:
+            printer._end_open_block()
+            print_api_error(console, error)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -381,7 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
         default='basic',
         help='Chat flow to use.',
     )
-    parser.add_argument('--conversation-id', "-c", help='Resume a specific conversation ID.')
+    parser.add_argument('--conversation-id', '-c', help='Resume a specific conversation ID.')
     parser.add_argument(
         '--latest',
         action='store_true',
@@ -416,6 +452,8 @@ def main() -> None:
         run_chat_loop(backend, console, state)
     except KeyboardInterrupt:
         print_resume_hint(console, args.base_url, state)
+    except httpx.HTTPError as error:
+        print_api_error(console, error)
     finally:
         backend.close()
 

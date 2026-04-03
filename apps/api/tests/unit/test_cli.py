@@ -1,4 +1,7 @@
+import httpx
+
 from streaming_chat_api.cli import ConversationState, _iter_sse_events, build_resume_command
+from streaming_chat_api.cli import format_http_error
 
 
 def test_iter_sse_events_parses_stream_and_stops_on_done() -> None:
@@ -40,3 +43,11 @@ def test_build_resume_command_includes_non_default_base_url() -> None:
         'uv run --project apps/api chat --mode temporal '
         '--conversation-id conversation-123 --base-url http://127.0.0.1:8001'
     )
+
+
+def test_format_http_error_prefers_json_detail() -> None:
+    request = httpx.Request('GET', 'http://example.com/api')
+    response = httpx.Response(500, request=request, json={'detail': 'boom'})
+    error = httpx.HTTPStatusError('server error', request=request, response=response)
+
+    assert format_http_error(error) == 'HTTP 500: boom'
