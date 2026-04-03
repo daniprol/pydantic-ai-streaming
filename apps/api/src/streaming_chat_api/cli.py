@@ -8,10 +8,7 @@ from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 import httpx
-from rich.console import Console, Group, RenderableType
-from rich.live import Live
-from rich.panel import Panel
-from rich.pretty import Pretty
+from rich.console import Console
 from rich.prompt import Prompt
 from rich.rule import Rule
 from rich.table import Table
@@ -142,122 +139,142 @@ def build_message(text: str) -> dict[str, Any]:
     }
 
 
-def render_message(message: dict[str, Any]) -> list[RenderableType]:
+def _flush_console(console: Console) -> None:
+    flush = getattr(console.file, 'flush', None)
+    if callable(flush):
+        flush()
+
+
+def _print_inline(console: Console, text: str, *, style: str) -> None:
+    rendered = console.get_style(style).render(text, color_system=console.color_system)
+    console.file.write(rendered)
+    _flush_console(console)
+
+
+def _print_block(
+    console: Console, label: str, text: str, *, label_style: str, text_style: str
+) -> None:
+    console.print(Text(label, style=label_style))
+    console.print(Text(text, style=text_style), soft_wrap=True)
+
+
+def print_message(console: Console, message: dict[str, Any]) -> None:
     role = cast(str, message.get('role', 'assistant'))
-    renderables: list[RenderableType] = []
+    text_parts: list[str] = []
     for part in cast(list[dict[str, Any]], message.get('parts', [])):
         part_type = cast(str, part.get('type', ''))
         if part_type == 'text':
-            renderables.append(
-                Panel(
-                    Text(cast(str, part.get('text', '')), style='white'),
-                    border_style=ROLE_STYLES.get(role, 'white'),
-                    title=role.title(),
-                )
-            )
+            text_parts.append(cast(str, part.get('text', '')))
             continue
         if part_type == 'reasoning':
-            renderables.append(
-                Panel(
-                    Text(cast(str, part.get('text', '')), style='italic magenta'),
-                    border_style='magenta',
-                    title='Reasoning',
-                )
+            _print_block(
+                console,
+                'THINKING:',
+                cast(str, part.get('text', '')),
+                label_style='italic dim bright_black',
+                text_style='italic dim bright_black',
             )
             continue
         if 'tool' in part_type:
-            renderables.append(
-                Panel(
-                    Pretty(
-                        {
-                            'tool_name': part.get('tool_name'),
-                            'state': part.get('state'),
-                            'input': part.get('input'),
-                            'output': part.get('output'),
-                        },
-                        expand_all=True,
-                    ),
-                    border_style='yellow',
-                    title='Tool Call',
-                )
+            tool_name = cast(str | None, part.get('tool_name')) or cast(
+                str | None, part.get('toolName')
             )
-    return renderables
+            tool_state = cast(str | None, part.get('state'))
+            suffix = f' [{tool_state}]' if tool_state else ''
+            console.print(Text(f'TOOL: {tool_name or "unknown"}{suffix}', style='yellow'))
+
+    if text_parts:
+        label = f'{role.upper()}:'
+        _print_block(
+            console,
+            label,
+            '\n'.join(text_parts),
+            label_style=ROLE_STYLES.get(role, 'bold white'),
+            text_style='white',
+        )
 
 
-class StreamRenderer:
-    def __init__(self):
-        self.completed: list[RenderableType] = []
-        self.current_text = ''
-        self.current_reasoning = ''
+class StreamPrinter:
+    def __init__(self, console: Console):
+        self.console = console
+        self.assistant_open = False
+        self.thinking_open = False
+        self.tool_names: dict[str, str] = {}
 
-    def render(self) -> RenderableType:
-        renderables = list(self.completed)
-        if self.current_reasoning:
-            renderables.append(
-                Panel(
-                    Text(self.current_reasoning, style='italic magenta'),
-                    border_style='magenta',
-                    title='Thinking',
-                )
-            )
-        if self.current_text:
-            renderables.append(
-                Panel(
-                    Text(self.current_text, style='bold green'),
-                    border_style='green',
-                    title='Assistant',
-                )
-            )
-        return Group(*renderables) if renderables else Text('')
+    def _end_open_block(self) -> None:
+        if self.assistant_open or self.thinking_open:
+            self.console.print()
+            _flush_console(self.console)
+        self.assistant_open = False
+        self.thinking_open = False
+
+    def _start_assistant(self) -> None:
+        if self.assistant_open:
+            return
+        self._end_open_block()
+        self.console.print(Text('ASSISTANT:', style='bold green'))
+        self.assistant_open = True
+
+    def _start_thinking(self) -> None:
+        if self.thinking_open:
+            return
+        self._end_open_block()
+        self.console.print(Text('THINKING:', style='italic dim bright_black'))
+        self.thinking_open = True
 
     def handle_event(self, event: dict[str, Any]) -> None:
         event_type = cast(str, event.get('type', ''))
+        if event_type == 'reasoning-start':
+            self._start_thinking()
+            return
         if event_type == 'reasoning-delta':
-            self.current_reasoning += cast(str, event.get('delta', ''))
+            self._start_thinking()
+            _print_inline(
+                self.console, cast(str, event.get('delta', '')), style='italic dim bright_black'
+            )
             return
         if event_type == 'reasoning-end':
-            if self.current_reasoning:
-                self.completed.append(
-                    Panel(
-                        Text(self.current_reasoning, style='italic magenta'),
-                        border_style='magenta',
-                        title='Thinking',
-                    )
-                )
-                self.current_reasoning = ''
+            self._end_open_block()
+            return
+        if event_type == 'text-start':
+            self._start_assistant()
             return
         if event_type == 'text-delta':
-            self.current_text += cast(str, event.get('delta', ''))
+            self._start_assistant()
+            _print_inline(self.console, cast(str, event.get('delta', '')), style='green')
             return
         if event_type == 'text-end':
-            if self.current_text:
-                self.completed.append(
-                    Panel(
-                        Text(self.current_text, style='bold green'),
-                        border_style='green',
-                        title='Assistant',
-                    )
-                )
-                self.current_text = ''
+            self._end_open_block()
             return
-        if event_type in {'tool-input-start', 'tool-input-available', 'tool-output-available'}:
-            self.completed.append(
-                Panel(
-                    Pretty(event, expand_all=True),
-                    border_style='yellow',
-                    title='Tool Event',
-                )
+        if event_type == 'tool-input-start':
+            self._end_open_block()
+            tool_call_id = cast(str, event.get('toolCallId', ''))
+            tool_name = cast(str, event.get('toolName', 'unknown'))
+            self.tool_names[tool_call_id] = tool_name
+            self.console.print(Text(f'TOOL: {tool_name}', style='yellow'))
+            return
+        if event_type == 'tool-output-error':
+            self._end_open_block()
+            tool_name = self.tool_names.get(cast(str, event.get('toolCallId', '')), 'unknown')
+            self.console.print(Text(f'TOOL ERROR: {tool_name}', style='bold red'))
+            return
+        if event_type == 'error':
+            self._end_open_block()
+            self.console.print(
+                Text(f'ERROR: {event.get("errorText", "Unknown stream error")}', style='bold red')
             )
+            return
+        if event_type in {'finish', 'abort'}:
+            self._end_open_block()
 
 
 def print_history(console: Console, state: ConversationState) -> None:
     if not state.messages:
-        console.print('[dim]No messages yet.[/dim]')
+        console.print(Text('No messages yet.', style='dim'))
         return
     console.print(Rule(f'Conversation {state.id}'))
     for message in state.messages:
-        for renderable in render_message(message):
-            console.print(renderable)
+        print_message(console, message)
 
 
 def choose_conversation(
@@ -274,11 +291,11 @@ def choose_conversation(
 
     if resolved_conversation_id is None:
         resolved_conversation_id = backend.create_conversation(flow)
-        console.print(f'[bold green]Created conversation:[/bold green] {resolved_conversation_id}')
+        console.print(Text(f'Created conversation: {resolved_conversation_id}', style='bold green'))
         return ConversationState(id=resolved_conversation_id, flow=flow, messages=[])
 
     messages = backend.load_messages(flow, resolved_conversation_id)
-    console.print(f'[bold blue]Resumed conversation:[/bold blue] {resolved_conversation_id}')
+    console.print(Text(f'Resumed conversation: {resolved_conversation_id}', style='bold blue'))
     return ConversationState(id=resolved_conversation_id, flow=flow, messages=messages)
 
 
@@ -300,9 +317,30 @@ def print_conversations_table(
     console.print(table)
 
 
+def build_resume_command(base_url: str, state: ConversationState) -> str:
+    command = [
+        'uv run --project apps/api chat',
+        f'--mode {state.flow}',
+        f'--conversation-id {state.id}',
+    ]
+    if base_url.rstrip('/') != 'http://127.0.0.1:8000':
+        command.append(f'--base-url {base_url}')
+    return ' '.join(command)
+
+
+def print_resume_hint(console: Console, base_url: str, state: ConversationState | None) -> None:
+    console.print()
+    if state is None:
+        console.print(Text('Interrupted.', style='bold yellow'))
+        return
+
+    console.print(Text('Interrupted. Resume with:', style='bold yellow'))
+    console.print(Text(build_resume_command(base_url, state), style='bold cyan'))
+
+
 def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationState) -> None:
     print_history(console, state)
-    console.print('[dim]Commands: /exit, /history, /new[/dim]')
+    console.print(Text('Commands: /exit, /history, /new', style='dim'))
 
     while True:
         prompt = Prompt.ask('[bold cyan]You[/bold cyan]').strip()
@@ -317,17 +355,14 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
         if prompt == '/new':
             state.id = backend.create_conversation(state.flow)
             state.messages = []
-            console.print(f'[bold green]Created conversation:[/bold green] {state.id}')
+            console.print(Text(f'Created conversation: {state.id}', style='bold green'))
             continue
 
         user_message = build_message(prompt)
-        console.print(Panel(Text(prompt, style='bold cyan'), border_style='cyan', title='User'))
 
-        renderer = StreamRenderer()
-        with Live(renderer.render(), console=console, refresh_per_second=16) as live:
-            for event in backend.stream_chat(state.flow, state.id, [user_message]):
-                renderer.handle_event(event)
-                live.update(renderer.render())
+        printer = StreamPrinter(console)
+        for event in backend.stream_chat(state.flow, state.id, [user_message]):
+            printer.handle_event(event)
 
         state.messages = backend.load_messages(state.flow, state.id)
 
@@ -340,12 +375,13 @@ def build_parser() -> argparse.ArgumentParser:
         help='Base URL for the API server.',
     )
     parser.add_argument(
+        '-m',
         '--mode',
         choices=['basic', 'dbos', 'temporal', 'dbos-replay'],
         default='basic',
         help='Chat flow to use.',
     )
-    parser.add_argument('--conversation-id', help='Resume a specific conversation ID.')
+    parser.add_argument('--conversation-id', "-c", help='Resume a specific conversation ID.')
     parser.add_argument(
         '--latest',
         action='store_true',
@@ -361,8 +397,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    console = Console()
+    console = Console(highlight=False)
     backend = HttpChatBackend(args.base_url)
+    state: ConversationState | None = None
     try:
         flow = cast(FlowType, args.mode)
         if args.list:
@@ -377,6 +414,8 @@ def main() -> None:
             latest=args.latest,
         )
         run_chat_loop(backend, console, state)
+    except KeyboardInterrupt:
+        print_resume_hint(console, args.base_url, state)
     finally:
         backend.close()
 

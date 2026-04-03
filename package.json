@@ -16,7 +16,8 @@
     "test:web": "pnpm --filter @streaming-chat/web test",
     "test:e2e": "pnpm --filter @streaming-chat/web e2e",
     "compose:up": "docker compose up --build",
-    "compose:down": "docker compose down -v"
+    "compose:down": "docker compose down -v",
+    "chat": "uv run --project apps/api chat -m basic"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
