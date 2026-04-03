@@ -23,7 +23,6 @@ describe('ChatPanel', () => {
       <ChatPanel
         flow="dbos-replay"
         conversationId="conversation-1"
-        sessionId="session-1"
         initialData={{
           conversation_id: 'conversation-1',
           flow_type: 'dbos-replay',

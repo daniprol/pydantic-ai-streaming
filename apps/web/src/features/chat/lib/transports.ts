@@ -5,16 +5,10 @@ import type { FlowType, UIConversationMessage } from '@/types/chat'
 interface TransportOptions {
   flow: FlowType
   conversationId: string
-  sessionId: string
   replayId: string | null
 }
 
-export function createTransport({
-  flow,
-  conversationId,
-  sessionId,
-  replayId,
-}: TransportOptions) {
+export function createTransport({ flow, conversationId, replayId }: TransportOptions) {
   return new DefaultChatTransport({
     api: `/api/v1/flows/${flow}/chat?conversation_id=${conversationId}`,
     prepareSendMessagesRequest: ({
@@ -28,9 +22,6 @@ export function createTransport({
     }) => {
       const latestMessage = messages.at(-1)
       return {
-        headers: {
-          'X-Session-Id': sessionId,
-        },
         body: {
           ...body,
           trigger: body?.trigger ?? 'submit-message',
@@ -42,9 +33,6 @@ export function createTransport({
     prepareReconnectToStreamRequest: () => {
       return {
         api: `/api/v1/flows/dbos-replay/streams/${replayId ?? conversationId}/replay`,
-        headers: {
-          'X-Session-Id': sessionId,
-        },
       }
     },
   })

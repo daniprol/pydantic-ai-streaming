@@ -3,25 +3,15 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_basic_flow_creates_and_lists_conversation(api_client, chat_request_factory) -> None:
-    create_response = await api_client.post(
-        '/api/v1/flows/basic/conversations',
-        headers={'X-Session-Id': 'session-1'},
-    )
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
     conversation_id = create_response.json()['conversation']['id']
 
     response = await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
         json=chat_request_factory('Where is my order?'),
-        headers={'X-Session-Id': 'session-1'},
     )
-    conversations = await api_client.get(
-        '/api/v1/flows/basic/conversations',
-        headers={'X-Session-Id': 'session-1'},
-    )
-    messages = await api_client.get(
-        f'/api/v1/flows/basic/conversations/{conversation_id}/messages',
-        headers={'X-Session-Id': 'session-1'},
-    )
+    conversations = await api_client.get('/api/v1/flows/basic/conversations')
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
 
     assert response.status_code == 200
     assert response.headers['x-vercel-ai-ui-message-stream'] == 'v1'
@@ -38,16 +28,12 @@ async def test_chat_accepts_deferred_tool_results_without_new_user_message(
     api_client,
     chat_request_factory,
 ) -> None:
-    create_response = await api_client.post(
-        '/api/v1/flows/basic/conversations',
-        headers={'X-Session-Id': 'session-2'},
-    )
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
     conversation_id = create_response.json()['conversation']['id']
 
     await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
         json=chat_request_factory('Check the policy'),
-        headers={'X-Session-Id': 'session-2'},
     )
     response = await api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
@@ -56,7 +42,6 @@ async def test_chat_accepts_deferred_tool_results_without_new_user_message(
             request_id='request-2',
             deferred_tool_results={'approvals': {'approval-1': True}},
         ),
-        headers={'X-Session-Id': 'session-2'},
     )
 
     assert response.status_code == 200
@@ -64,20 +49,15 @@ async def test_chat_accepts_deferred_tool_results_without_new_user_message(
 
 @pytest.mark.asyncio
 async def test_replay_flow_exposes_replay_endpoint(api_client, chat_request_factory) -> None:
-    create_response = await api_client.post(
-        '/api/v1/flows/dbos-replay/conversations',
-        headers={'X-Session-Id': 'session-3'},
-    )
+    create_response = await api_client.post('/api/v1/flows/dbos-replay/conversations')
     conversation_id = create_response.json()['conversation']['id']
 
     await api_client.post(
         f'/api/v1/flows/dbos-replay/chat?conversation_id={conversation_id}',
         json=chat_request_factory('Stream this answer'),
-        headers={'X-Session-Id': 'session-3'},
     )
     replay = await api_client.get(
         f'/api/v1/flows/dbos-replay/streams/{conversation_id}/replay',
-        headers={'X-Session-Id': 'session-3'},
         timeout=2,
     )
 
@@ -88,8 +68,7 @@ async def test_replay_flow_exposes_replay_endpoint(api_client, chat_request_fact
 @pytest.mark.asyncio
 async def test_missing_conversation_returns_404(api_client) -> None:
     response = await api_client.get(
-        '/api/v1/flows/basic/conversations/87319ab1-c3d1-4e7b-a238-5b932aef2e9a/messages',
-        headers={'X-Session-Id': 'session-404'},
+        '/api/v1/flows/basic/conversations/87319ab1-c3d1-4e7b-a238-5b932aef2e9a/messages'
     )
 
     assert response.status_code == 404

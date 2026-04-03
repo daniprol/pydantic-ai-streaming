@@ -1,9 +1,13 @@
+'use client'
+
 import { Badge } from '@/components/ui/badge'
-import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from '@/components/ui/carousel'
+import type { CarouselApi } from '@/components/ui/carousel'
+import { Carousel, CarouselContent, CarouselItem } from '@/components/ui/carousel'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
 import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
-import { type ComponentProps, createContext, useCallback, useContext, useEffect, useState } from 'react'
+import type { ComponentProps } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 
 export type InlineCitationProps = ComponentProps<'span'>
 
@@ -30,7 +34,7 @@ export type InlineCitationCardTriggerProps = ComponentProps<typeof Badge> & {
 export const InlineCitationCardTrigger = ({ sources, className, ...props }: InlineCitationCardTriggerProps) => (
   <HoverCardTrigger asChild>
     <Badge className={cn('ml-1 rounded-full', className)} variant="secondary" {...props}>
-      {sources.length ? (
+      {sources[0] ? (
         <>
           {new URL(sources[0]).hostname} {sources.length > 1 && `+${sources.length - 1}`}
         </>
@@ -93,18 +97,27 @@ export const InlineCitationCarouselIndex = ({ children, className, ...props }: I
   const [current, setCurrent] = useState(0)
   const [count, setCount] = useState(0)
 
+  const syncState = useCallback(() => {
+    if (!api) {
+      return
+    }
+    setCount(api.scrollSnapList().length)
+    setCurrent(api.selectedScrollSnap() + 1)
+  }, [api])
+
   useEffect(() => {
     if (!api) {
       return
     }
 
-    setCount(api.scrollSnapList().length)
-    setCurrent(api.selectedScrollSnap() + 1)
+    syncState()
 
-    api.on('select', () => {
-      setCurrent(api.selectedScrollSnap() + 1)
-    })
-  }, [api])
+    api.on('select', syncState)
+
+    return () => {
+      api.off('select', syncState)
+    }
+  }, [api, syncState])
 
   return (
     <div

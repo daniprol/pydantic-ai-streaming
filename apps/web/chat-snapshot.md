@@ -1,0 +1,97 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - paragraph [ref=e7]: Streaming Chat Lab
+          - heading "Multi-flow PydanticAI playground" [level=1] [ref=e8]
+        - generic [ref=e9]:
+          - navigation [ref=e10]:
+            - link "Basic" [ref=e11] [cursor=pointer]:
+              - /url: /basic
+            - link "DBOS" [ref=e12] [cursor=pointer]:
+              - /url: /dbos
+            - link "Temporal" [ref=e13] [cursor=pointer]:
+              - /url: /temporal
+            - link "Replay" [ref=e14] [cursor=pointer]:
+              - /url: /dbos-replay
+          - button "Toggle theme" [ref=e15]:
+            - img
+            - generic [ref=e16]: Toggle theme
+    - generic [ref=e17]:
+      - complementary [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - paragraph [ref=e21]: Conversations
+            - heading "Current flow history" [level=2] [ref=e22]
+          - link "New chat" [ref=e23] [cursor=pointer]:
+            - /url: /basic
+        - link "hi New conversation 4/3/2026, 12:30:22 PM" [ref=e42] [cursor=pointer]:
+          - /url: /basic/conversations/879e61eb-88f3-43a7-aed3-0f8c8073741e
+          - paragraph [ref=e43]: hi
+          - paragraph [ref=e44]: New conversation
+          - paragraph [ref=e45]: 4/3/2026, 12:30:22 PM
+      - main [ref=e26]:
+        - generic [ref=e27]:
+          - paragraph [ref=e28]: Basic
+          - heading "Direct PydanticAI streaming" [level=2] [ref=e29]
+        - generic [ref=e46]:
+          - log [ref=e47]:
+            - generic [ref=e49]:
+              - paragraph [ref=e55]: hi
+              - generic [ref=e56]:
+                - button "lookup_order_status Completed" [ref=e58]:
+                  - generic [ref=e59]:
+                    - img [ref=e60]
+                    - generic [ref=e62]: lookup_order_status
+                    - generic [ref=e63]:
+                      - img
+                      - text: Completed
+                  - img [ref=e64]
+                - button "check_service_health Completed" [ref=e67]:
+                  - generic [ref=e68]:
+                    - img [ref=e69]
+                    - generic [ref=e71]: check_service_health
+                    - generic [ref=e72]:
+                      - img
+                      - text: Completed
+                  - img [ref=e73]
+                - button "search_help_center Completed" [ref=e76]:
+                  - generic [ref=e77]:
+                    - img [ref=e78]
+                    - generic [ref=e80]: search_help_center
+                    - generic [ref=e81]:
+                      - img
+                      - text: Completed
+                  - img [ref=e82]
+                - button "ask_policy_researcher Completed" [ref=e85]:
+                  - generic [ref=e86]:
+                    - img [ref=e87]
+                    - generic [ref=e89]: ask_policy_researcher
+                    - generic [ref=e90]:
+                      - img
+                      - text: Completed
+                  - img [ref=e91]
+                - generic [ref=e93]:
+                  - paragraph [ref=e97]:
+                    - text: "{\"lookup_order_status\":{\"order_id\":\"a\",\"status\":\"delivered\",\"eta\":\"completed\"},\"check_service_health\":{\"service\":\"a\",\"status\":\"operational\",\"region\":\"west-europe\"},\"search_help_center\":[{\"title\":\"Troubleshooting streaming delays\",\"summary\":\"Help-center match for: a\",\"url\":\""
+                    - 'link "https://example.com/help/streaming-delays\"},{\"title\":\"How" [ref=e98] [cursor=pointer]':
+                      - /url: https://example.com/help/streaming-delays%22%7D,%7B%22title%22:%22How
+                    - text: session-based support chats work","summary":"Overview of session history and reconnect support.","url":"
+                    - 'link "https://example.com/help/session-chats\"}],\"ask_policy_researcher\":\"success" [ref=e99] [cursor=pointer]':
+                      - /url: https://example.com/help/session-chats%22%7D%5D,%22ask_policy_researcher%22:%22success
+                    - text: "(no tool calls)\"}"
+                  - generic [ref=e100]:
+                    - button "Retry" [ref=e101]:
+                      - img
+                      - generic [ref=e102]: Retry
+                    - button "Copy" [ref=e103]:
+                      - img
+                      - generic [ref=e104]: Copy
+          - generic [ref=e107]:
+            - textbox "Ask about an order, service health, or support policy..." [ref=e108]
+            - generic [ref=e109]:
+              - generic [ref=e110]: Each flow uses the same chat UI with a different backend runner.
+              - button [disabled]:
+                - img
+  - region "Notifications alt+T"

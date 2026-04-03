@@ -13,10 +13,6 @@ const conversationMessagesState = vi.hoisted(() => ({
   error: undefined as ApiError | undefined,
 }))
 
-vi.mock('@/stores/ui-store', () => ({
-  useUIStore: (selector: (state: { sessionId: string }) => string) => selector({ sessionId: 'session-1' }),
-}))
-
 vi.mock('@/features/conversations/hooks/useConversations', () => ({
   useConversations: () => ({
     data: {

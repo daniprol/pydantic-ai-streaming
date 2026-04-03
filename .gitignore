@@ -44,3 +44,4 @@ tmp/
 
 # TypeScript build info
 tsconfig.tsbuildinfo
+**/.playwright-mcp/

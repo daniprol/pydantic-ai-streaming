@@ -1,0 +1,42 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - paragraph [ref=e7]: Streaming Chat Lab
+          - heading "Multi-flow PydanticAI playground" [level=1] [ref=e8]
+        - generic [ref=e9]:
+          - navigation [ref=e10]:
+            - link "Basic" [ref=e11] [cursor=pointer]:
+              - /url: /basic
+            - link "DBOS" [ref=e12] [cursor=pointer]:
+              - /url: /dbos
+            - link "Temporal" [ref=e13] [cursor=pointer]:
+              - /url: /temporal
+            - link "Replay" [ref=e14] [cursor=pointer]:
+              - /url: /dbos-replay
+          - button "Toggle theme" [ref=e15]:
+            - img
+            - generic [ref=e16]: Toggle theme
+    - generic [ref=e17]:
+      - complementary [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - paragraph [ref=e21]: Conversations
+            - heading "Current flow history" [level=2] [ref=e22]
+          - link "New chat" [ref=e23] [cursor=pointer]:
+            - /url: /basic
+        - generic [ref=e25]: No conversations yet for this flow.
+      - main [ref=e26]:
+        - generic [ref=e27]:
+          - paragraph [ref=e28]: Basic
+          - heading "Direct PydanticAI streaming" [level=2] [ref=e29]
+        - generic [ref=e31]:
+          - log [ref=e32]
+          - generic [ref=e37]:
+            - textbox "Ask about an order, service health, or support policy..." [active] [ref=e38]
+            - generic [ref=e39]:
+              - generic [ref=e40]: Each flow uses the same chat UI with a different backend runner.
+              - button [disabled]:
+                - img
+  - region "Notifications alt+T"

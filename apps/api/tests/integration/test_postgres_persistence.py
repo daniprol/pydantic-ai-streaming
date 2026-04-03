@@ -38,7 +38,6 @@ async def test_postgres_repository_persists_session_conversation_and_messages(
 
     repository = ChatRepository(postgres_db_session)
     conversations, total = await repository.list_conversations(
-        session_id=session.id,
         flow_type=FlowType.BASIC,
         skip=0,
         limit=10,
@@ -76,7 +75,6 @@ async def test_postgres_repository_keeps_flow_histories_partitioned(
 
     repository = ChatRepository(postgres_db_session)
     basic_conversations, total = await repository.list_conversations(
-        session_id=session.id,
         flow_type=FlowType.BASIC,
         skip=0,
         limit=10,
@@ -92,24 +90,16 @@ async def test_postgres_chat_api_persists_messages_and_lists_conversation(
     postgres_api_client,
     chat_request_factory,
 ) -> None:
-    create_response = await postgres_api_client.post(
-        '/api/v1/flows/basic/conversations',
-        headers={'X-Session-Id': 'postgres-session'},
-    )
+    create_response = await postgres_api_client.post('/api/v1/flows/basic/conversations')
     conversation_id = create_response.json()['conversation']['id']
 
     response = await postgres_api_client.post(
         f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
         json=chat_request_factory('Persist this through Postgres'),
-        headers={'X-Session-Id': 'postgres-session'},
     )
-    conversations = await postgres_api_client.get(
-        '/api/v1/flows/basic/conversations',
-        headers={'X-Session-Id': 'postgres-session'},
-    )
+    conversations = await postgres_api_client.get('/api/v1/flows/basic/conversations')
     messages = await postgres_api_client.get(
-        f'/api/v1/flows/basic/conversations/{conversation_id}/messages',
-        headers={'X-Session-Id': 'postgres-session'},
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
     )
 
     assert response.status_code == 200

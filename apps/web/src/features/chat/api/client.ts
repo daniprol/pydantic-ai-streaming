@@ -17,12 +17,11 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, sessionId: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      'X-Session-Id': sessionId,
       ...(init?.headers ?? {}),
     },
   })
@@ -34,23 +33,22 @@ async function apiFetch<T>(path: string, sessionId: string, init?: RequestInit):
   return (await response.json()) as T
 }
 
-export function fetchConversations(flow: FlowType, sessionId: string) {
-  return apiFetch<ConversationListResponse>(`/flows/${flow}/conversations`, sessionId)
+export function fetchConversations(flow: FlowType) {
+  return apiFetch<ConversationListResponse>(`/flows/${flow}/conversations`)
 }
 
-export function createConversation(flow: FlowType, sessionId: string) {
-  return apiFetch<ConversationCreateResponse>(`/flows/${flow}/conversations`, sessionId, {
+export function createConversation(flow: FlowType) {
+  return apiFetch<ConversationCreateResponse>(`/flows/${flow}/conversations`, {
     method: 'POST',
   })
 }
 
-export function fetchConversationMessages(
-  flow: FlowType,
-  conversationId: string,
-  sessionId: string,
-) {
-  return apiFetch<ConversationMessagesResponse>(
-    `/flows/${flow}/conversations/${conversationId}/messages`,
-    sessionId,
-  )
+export function deleteConversation(flow: FlowType, conversationId: string) {
+  return apiFetch<void>(`/flows/${flow}/conversations/${conversationId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function fetchConversationMessages(flow: FlowType, conversationId: string) {
+  return apiFetch<ConversationMessagesResponse>(`/flows/${flow}/conversations/${conversationId}/messages`)
 }

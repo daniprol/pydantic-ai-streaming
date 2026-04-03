@@ -1,6 +1,6 @@
 import type { FlowType } from '@/types/chat'
 
-export const FLOWS: Array<{ id: FlowType; label: string; blurb: string }> = [
+export const FLOWS: { id: FlowType; label: string; blurb: string }[] = [
   {
     id: 'basic',
     label: 'Basic',

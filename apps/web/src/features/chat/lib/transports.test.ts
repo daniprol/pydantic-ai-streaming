@@ -5,14 +5,13 @@ describe('createTransport', () => {
     const transport = createTransport({
       flow: 'basic',
       conversationId: 'conversation-1',
-      sessionId: 'session-1',
       replayId: null,
     }) as unknown as {
       prepareSendMessagesRequest: (input: {
-        messages: Array<{ id: string }>
+        messages: { id: string }[]
         body?: Record<string, unknown>
         id?: string
-      }) => { body: Record<string, unknown>; headers: Record<string, string> }
+      }) => { body: Record<string, unknown> }
     }
 
     const request = transport.prepareSendMessagesRequest({
@@ -21,7 +20,6 @@ describe('createTransport', () => {
       messages: [{ id: 'one' }, { id: 'two' }],
     })
 
-    expect(request.headers['X-Session-Id']).toBe('session-1')
     expect(request.body.trigger).toBe('submit-message')
     expect(request.body.id).toBe('request-1')
     expect(request.body.messages).toEqual([{ id: 'two' }])

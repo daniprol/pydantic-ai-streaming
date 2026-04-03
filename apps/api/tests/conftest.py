@@ -254,12 +254,10 @@ def chat_request_factory():
 def agent_deps_factory(resources: AppResources):
     def factory(
         *,
-        session_id: str = 'session-1',
         conversation_id: str = 'conversation-1',
         flow_type: str = FlowType.BASIC.value,
     ) -> AgentDependencies:
         return AgentDependencies(
-            session_id=session_id,
             conversation_id=conversation_id,
             flow_type=flow_type,
             support_client=resources.support_client,

@@ -11,7 +11,6 @@ from pydantic_ai.durable_exec.temporal import PydanticAIWorkflow
 class WorkflowInput:
     prompt: str
     conversation_id: str
-    session_id: str
 
 
 @workflow.defn
@@ -22,6 +21,5 @@ class SupportWorkflow(PydanticAIWorkflow):
     async def run(self, payload: WorkflowInput) -> dict[str, str]:
         return {
             'conversation_id': payload.conversation_id,
-            'session_id': payload.session_id,
             'status': 'configured',
         }

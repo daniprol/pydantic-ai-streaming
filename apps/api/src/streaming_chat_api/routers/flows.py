@@ -4,10 +4,10 @@ from uuid import UUID
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from streaming_chat_api.dependencies.resources import get_db_session, get_resources, get_session_id
+from streaming_chat_api.dependencies.resources import get_db_session, get_resources
 from streaming_chat_api.models.entities import FlowType
 from streaming_chat_api.schemas.chat import (
     ConversationCreateResponse,
@@ -31,13 +31,11 @@ def get_chat_service(resources: AppResources = Depends(get_resources)) -> ChatSe
 async def list_conversations(
     flow: FlowType,
     pagination: Annotated[OffsetPaginationParams, Depends()],
-    session_id: str = Depends(get_session_id),
     db: AsyncSession = Depends(get_db_session),
     service: ChatService = Depends(get_chat_service),
 ) -> ConversationListResponse:
     return await service.list_conversations(
         db=db,
-        session_id=session_id,
         flow_type=flow,
         pagination=pagination,
     )
@@ -46,15 +44,32 @@ async def list_conversations(
 @router.post('/{flow}/conversations', response_model=ConversationCreateResponse, status_code=201)
 async def create_conversation(
     flow: FlowType,
-    session_id: str = Depends(get_session_id),
     db: AsyncSession = Depends(get_db_session),
     service: ChatService = Depends(get_chat_service),
 ) -> ConversationCreateResponse:
     return await service.create_conversation(
         db=db,
-        session_id=session_id,
         flow_type=flow,
     )
+
+
+@router.delete('/{flow}/conversations/{conversation_id}', status_code=204)
+async def delete_conversation(
+    flow: FlowType,
+    conversation_id: UUID,
+    db: AsyncSession = Depends(get_db_session),
+    service: ChatService = Depends(get_chat_service),
+) -> None:
+    deleted = await service.delete_conversation(
+        db=db,
+        flow_type=flow,
+        conversation_id=conversation_id,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Conversation not found',
+        )
 
 
 @router.get(
@@ -64,13 +79,11 @@ async def create_conversation(
 async def get_conversation_messages(
     flow: FlowType,
     conversation_id: UUID,
-    session_id: str = Depends(get_session_id),
     db: AsyncSession = Depends(get_db_session),
     service: ChatService = Depends(get_chat_service),
 ) -> ConversationMessagesResponse:
     return await service.get_messages(
         db=db,
-        session_id=session_id,
         flow_type=flow,
         conversation_id=conversation_id,
     )
@@ -81,14 +94,12 @@ async def chat(
     flow: FlowType,
     request: Request,
     conversation_id: UUID = Query(...),
-    session_id: str = Depends(get_session_id),
     db: AsyncSession = Depends(get_db_session),
     service: ChatService = Depends(get_chat_service),
 ):
     return await service.stream_chat(
         db=db,
         request=request,
-        session_id=session_id,
         flow_type=flow,
         conversation_id=conversation_id,
     )

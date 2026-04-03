@@ -1,4 +1,5 @@
-import * as React from 'react'
+'use client'
+
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
@@ -6,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils'
 import { ChevronDownIcon } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
-import { createContext, useContext, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 
 export interface WebPreviewContextValue {
   url: string
@@ -34,17 +35,23 @@ export const WebPreview = ({ className, children, defaultUrl = '', onUrlChange, 
   const [url, setUrl] = useState(defaultUrl)
   const [consoleOpen, setConsoleOpen] = useState(false)
 
-  const handleUrlChange = (newUrl: string) => {
-    setUrl(newUrl)
-    onUrlChange?.(newUrl)
-  }
+  const handleUrlChange = useCallback(
+    (newUrl: string) => {
+      setUrl(newUrl)
+      onUrlChange?.(newUrl)
+    },
+    [onUrlChange],
+  )
 
-  const contextValue: WebPreviewContextValue = {
-    url,
-    setUrl: handleUrlChange,
-    consoleOpen,
-    setConsoleOpen,
-  }
+  const contextValue = useMemo<WebPreviewContextValue>(
+    () => ({
+      consoleOpen,
+      setConsoleOpen,
+      setUrl: handleUrlChange,
+      url,
+    }),
+    [consoleOpen, handleUrlChange, url],
+  )
 
   return (
     <WebPreviewContext.Provider value={contextValue}>
@@ -99,22 +106,38 @@ export type WebPreviewUrlProps = ComponentProps<typeof Input>
 
 export const WebPreviewUrl = ({ value, onChange, onKeyDown, ...props }: WebPreviewUrlProps) => {
   const { url, setUrl } = useWebPreview()
+  const [prevUrl, setPrevUrl] = useState(url)
+  const [inputValue, setInputValue] = useState(url)
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      const target = event.target as HTMLInputElement
-      setUrl(target.value)
-    }
-    onKeyDown?.(event)
+  // Sync input value with context URL when it changes externally (derived state pattern)
+  if (url !== prevUrl) {
+    setPrevUrl(url)
+    setInputValue(url)
   }
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(event.target.value)
+    onChange?.(event)
+  }
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter') {
+        const target = event.target as HTMLInputElement
+        setUrl(target.value)
+      }
+      onKeyDown?.(event)
+    },
+    [setUrl, onKeyDown],
+  )
 
   return (
     <Input
       className="h-8 flex-1 text-sm"
-      onChange={onChange}
+      onChange={onChange ?? handleChange}
       onKeyDown={handleKeyDown}
       placeholder="Enter URL..."
-      value={value ?? url}
+      value={value ?? inputValue}
       {...props}
     />
   )
@@ -131,6 +154,7 @@ export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreview
     <div className="flex-1">
       <iframe
         className={cn('size-full', className)}
+        // oxlint-disable-next-line eslint-plugin-react(iframe-missing-sandbox)
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
         src={(src ?? url) || undefined}
         title="Preview"
@@ -178,7 +202,7 @@ export const WebPreviewConsole = ({ className, logs = [], children, ...props }: 
           {logs.length === 0 ? (
             <p className="text-muted-foreground">No console output</p>
           ) : (
-            logs.map((log, index) => (
+            logs.map((log) => (
               <div
                 className={cn(
                   'text-xs',
@@ -186,7 +210,7 @@ export const WebPreviewConsole = ({ className, logs = [], children, ...props }: 
                   log.level === 'warn' && 'text-yellow-600',
                   log.level === 'log' && 'text-foreground',
                 )}
-                key={`${log.timestamp.getTime()}-${index}`}
+                key={`${log.timestamp.getTime()}-${log.level}-${log.message}`}
               >
                 <span className="text-muted-foreground">{log.timestamp.toLocaleTimeString()}</span> {log.message}
               </div>

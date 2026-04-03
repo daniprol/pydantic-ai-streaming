@@ -43,9 +43,7 @@ export function ConversationSidebar({
             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
               {conversation.preview ?? 'No preview yet'}
             </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {new Date(conversation.updated_at).toLocaleString()}
-            </p>
+            <p className="mt-2 text-xs text-muted-foreground">{new Date(conversation.updated_at).toLocaleString()}</p>
           </Link>
         ))}
       </div>

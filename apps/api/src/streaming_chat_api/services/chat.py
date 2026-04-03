@@ -77,7 +77,6 @@ class ChatFlowRunner:
         request: Request,
         db: AsyncSession,
         resources: AppResources,
-        session_id: str,
         conversation_id: UUID,
     ) -> Response:
         repository = ChatRepository(db)
@@ -100,15 +99,7 @@ class ChatFlowRunner:
                 detail='Request must include a new user message, a regenerate trigger, or deferred tool results.',
             )
 
-        session = await repository.get_session_by_client_id(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail='Conversation not found',
-            )
-        conversation = await repository.get_conversation(
-            session.id, conversation_id, self.flow_type
-        )
+        conversation = await repository.get_conversation(conversation_id, self.flow_type)
         if conversation is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -152,7 +143,6 @@ class ChatFlowRunner:
         await db.commit()
 
         deps = AgentDependencies(
-            session_id=session_id,
             conversation_id=str(conversation.id),
             flow_type=self.flow_type.value,
             support_client=resources.support_client,
@@ -167,7 +157,6 @@ class ChatFlowRunner:
             await _persist_completion(
                 db=db,
                 conversation_id=conversation.id,
-                session_id=session.id,
                 flow_type=self.flow_type,
                 repository=repository,
                 result=result,
@@ -197,13 +186,12 @@ async def _persist_completion(
     *,
     db: AsyncSession,
     conversation_id: UUID,
-    session_id: UUID,
     flow_type: FlowType,
     repository: ChatRepository,
     result: AgentRunResult[str],
     replay_enabled: bool,
 ) -> None:
-    conversation = await repository.get_conversation(session_id, conversation_id, flow_type)
+    conversation = await repository.get_conversation(conversation_id, flow_type)
     if conversation is None:
         return
 
@@ -253,26 +241,15 @@ class ChatService:
         self,
         *,
         db: AsyncSession,
-        session_id: str,
         flow_type: FlowType,
         pagination: OffsetPaginationParams,
     ) -> ConversationListResponse:
         repository = ChatRepository(db)
-        chat_session = await repository.get_session_by_client_id(session_id)
-        if chat_session is None:
-            return ConversationListResponse(
-                items=[],
-                skip=pagination.skip,
-                limit=pagination.limit,
-                total=0,
-            )
         conversations, total = await repository.list_conversations(
-            session_id=chat_session.id,
             flow_type=flow_type,
             skip=pagination.skip,
             limit=pagination.limit,
         )
-        await db.commit()
         return ConversationListResponse(
             items=[
                 ConversationSummary.model_validate(conversation, from_attributes=True)
@@ -287,11 +264,10 @@ class ChatService:
         self,
         *,
         db: AsyncSession,
-        session_id: str,
         flow_type: FlowType,
     ) -> ConversationCreateResponse:
         repository = ChatRepository(db)
-        chat_session = await repository.get_or_create_session(session_id)
+        chat_session = await repository.get_or_create_default_session()
         conversation = await repository.get_or_create_conversation(
             session_id=chat_session.id,
             conversation_id=uuid4(),
@@ -304,31 +280,34 @@ class ChatService:
             conversation=ConversationSummary.model_validate(conversation, from_attributes=True)
         )
 
+    async def delete_conversation(
+        self,
+        *,
+        db: AsyncSession,
+        flow_type: FlowType,
+        conversation_id: UUID,
+    ) -> bool:
+        repository = ChatRepository(db)
+        deleted = await repository.delete_conversation(conversation_id, flow_type)
+        if deleted:
+            await db.commit()
+        return deleted
+
     async def get_messages(
         self,
         *,
         db: AsyncSession,
-        session_id: str,
         flow_type: FlowType,
         conversation_id: UUID,
     ) -> ConversationMessagesResponse:
         repository = ChatRepository(db)
-        chat_session = await repository.get_session_by_client_id(session_id)
-        if chat_session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail='Conversation not found',
-            )
-        conversation = await repository.get_conversation(
-            chat_session.id, conversation_id, flow_type
-        )
+        conversation = await repository.get_conversation(conversation_id, flow_type)
         if conversation is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail='Conversation not found',
             )
         messages = await repository.list_messages(conversation_id)
-        await db.commit()
         return ConversationMessagesResponse(
             conversation_id=conversation_id,
             flow_type=flow_type,
@@ -341,7 +320,6 @@ class ChatService:
         *,
         db: AsyncSession,
         request: Request,
-        session_id: str,
         flow_type: FlowType,
         conversation_id: UUID,
     ) -> Response:
@@ -349,6 +327,5 @@ class ChatService:
             request=request,
             db=db,
             resources=self.resources,
-            session_id=session_id,
             conversation_id=conversation_id,
         )

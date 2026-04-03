@@ -19,7 +19,6 @@ PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
 
 @dataclass(slots=True)
 class AgentDependencies:
-    session_id: str
     conversation_id: str
     flow_type: str
     support_client: FakeSupportClient

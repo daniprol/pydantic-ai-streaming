@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,9 @@ from streaming_chat_api.models.entities import (
 )
 
 
+DEFAULT_CHAT_SESSION_CLIENT_ID = 'single-user'
+
+
 class ChatRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -27,12 +30,13 @@ class ChatRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_or_create_session(
-        self, client_id: str, user_agent: str | None = None
-    ) -> ChatSession:
+    async def get_or_create_default_session(self) -> ChatSession:
+        return await self.get_or_create_session(DEFAULT_CHAT_SESSION_CLIENT_ID)
+
+    async def get_or_create_session(self, client_id: str) -> ChatSession:
         chat_session = await self.get_session_by_client_id(client_id)
         if chat_session is None:
-            chat_session = ChatSession(client_id=client_id, user_agent=user_agent)
+            chat_session = ChatSession(client_id=client_id)
             try:
                 async with self.session.begin_nested():
                     self.session.add(chat_session)
@@ -41,17 +45,14 @@ class ChatRepository:
                 # Another request created the session concurrently.
                 chat_session = await self.get_session_by_client_id(client_id)
                 assert chat_session is not None
-        else:
-            chat_session.updated_at = utcnow()
         return chat_session
 
     async def get_conversation(
-        self, session_id: UUID, conversation_id: UUID, flow_type: FlowType
+        self, conversation_id: UUID, flow_type: FlowType
     ) -> ChatConversation | None:
         result = await self.session.execute(
             select(ChatConversation).where(
                 ChatConversation.id == conversation_id,
-                ChatConversation.session_id == session_id,
                 ChatConversation.flow_type == flow_type,
             )
         )
@@ -66,7 +67,7 @@ class ChatRepository:
         title: str | None,
         preview: str | None,
     ) -> ChatConversation:
-        conversation = await self.get_conversation(session_id, conversation_id, flow_type)
+        conversation = await self.get_conversation(conversation_id, flow_type)
         if conversation is None:
             conversation = ChatConversation(
                 id=conversation_id,
@@ -77,12 +78,6 @@ class ChatRepository:
             )
             self.session.add(conversation)
             await self.session.flush()
-        else:
-            conversation.updated_at = utcnow()
-            if title and not conversation.title:
-                conversation.title = title
-            if preview:
-                conversation.preview = preview
         return conversation
 
     async def get_or_create_thread(self, conversation_id: UUID, flow_type: FlowType) -> ChatThread:
@@ -99,13 +94,11 @@ class ChatRepository:
     async def list_conversations(
         self,
         *,
-        session_id: UUID,
         flow_type: FlowType,
         skip: int,
         limit: int,
     ) -> tuple[list[ChatConversation], int]:
         base_query: Select[tuple[ChatConversation]] = select(ChatConversation).where(
-            ChatConversation.session_id == session_id,
             ChatConversation.flow_type == flow_type,
         )
         total = await self.session.scalar(select(func.count()).select_from(base_query.subquery()))
@@ -149,6 +142,16 @@ class ChatRepository:
         self.session.add(message)
         await self.session.flush()
         return message
+
+    async def delete_conversation(self, conversation_id: UUID, flow_type: FlowType) -> bool:
+        conversation = await self.get_conversation(conversation_id, flow_type)
+        if conversation:
+            await self.session.execute(delete(ChatMessage).where(ChatMessage.conversation_id == conversation_id))
+            await self.session.execute(delete(ChatThread).where(ChatThread.conversation_id == conversation_id))
+            await self.session.delete(conversation)
+            await self.session.flush()
+            return True
+        return False
 
     async def update_conversation_preview(
         self, conversation: ChatConversation, title: str | None, preview: str | None

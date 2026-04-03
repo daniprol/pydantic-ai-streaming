@@ -35,6 +35,6 @@ export interface ConversationMessagesResponse {
 export interface UIConversationMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
-  parts: Array<Record<string, unknown>>
+  parts: Record<string, unknown>[]
   metadata?: unknown
 }
