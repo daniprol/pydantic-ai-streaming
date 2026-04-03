@@ -12,10 +12,6 @@ import { CheckIcon, CopyIcon } from 'lucide-react'
 import type { ComponentProps } from 'react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
-interface SnippetContextType {
-  code: string
-}
-
 const SnippetContext = createContext({
   code: '',
 })

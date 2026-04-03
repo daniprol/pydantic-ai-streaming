@@ -92,10 +92,6 @@ interface TokenizedCode {
   bg: string
 }
 
-interface CodeBlockContextType {
-  code: string
-}
-
 // Context
 const CodeBlockContext = createContext({
   code: '',

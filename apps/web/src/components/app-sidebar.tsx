@@ -28,7 +28,7 @@ import {
 
 interface Conversation {
   id: string
-  title: string
+  title: string | null
 }
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {

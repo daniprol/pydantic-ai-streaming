@@ -7,6 +7,8 @@ import type { ToolUIPart } from 'ai'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, useContext, useMemo } from 'react'
 
+type ConfirmationState = ToolUIPart['state'] | 'approval-requested' | 'approval-responded' | 'output-denied'
+
 type ToolUIPartApproval =
   | {
       id: string
@@ -32,7 +34,7 @@ type ToolUIPartApproval =
 
 interface ConfirmationContextValue {
   approval: ToolUIPartApproval
-  state: ToolUIPart['state']
+  state: ConfirmationState
 }
 
 const ConfirmationContext = createContext<ConfirmationContextValue | null>(null)
@@ -49,7 +51,7 @@ const useConfirmation = () => {
 
 export type ConfirmationProps = ComponentProps<typeof Alert> & {
   approval?: ToolUIPartApproval
-  state: ToolUIPart['state']
+  state: ConfirmationState
 }
 
 export const Confirmation = ({ className, approval, state, ...props }: ConfirmationProps) => {

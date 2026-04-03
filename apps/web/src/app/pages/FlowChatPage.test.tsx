@@ -5,12 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { FlowChatPage } from '@/app/pages/FlowChatPage'
 import { NotFoundPage } from '@/app/pages/NotFoundPage'
 import { ApiError } from '@/features/chat/api/client'
+import type { ConversationMessagesResponse } from '@/types/chat'
 import { renderWithProviders } from '@/test/utils'
 
 const conversationMessagesState = vi.hoisted(() => ({
-  data: undefined,
-  isError: false,
+  data: undefined as ConversationMessagesResponse | undefined,
   error: undefined as ApiError | undefined,
+  isError: false,
 }))
 
 vi.mock('@/features/conversations/hooks/useConversations', () => ({
@@ -18,8 +19,12 @@ vi.mock('@/features/conversations/hooks/useConversations', () => ({
     data: {
       items: [],
     },
+    isLoading: false,
   }),
   useConversationMessages: () => conversationMessagesState,
+  useDeleteConversation: () => ({
+    mutateAsync: vi.fn().mockResolvedValue(undefined),
+  }),
 }))
 
 vi.mock('@/features/chat/components/ChatPanel', () => ({
@@ -27,7 +32,7 @@ vi.mock('@/features/chat/components/ChatPanel', () => ({
 }))
 
 describe('FlowChatPage', () => {
-  it('renders the shared layout for a valid flow route', () => {
+  it('renders the shared layout for a draft conversation route', () => {
     conversationMessagesState.data = undefined
     conversationMessagesState.isError = false
     conversationMessagesState.error = undefined
@@ -39,9 +44,44 @@ describe('FlowChatPage', () => {
       ['/basic'],
     )
 
-    expect(screen.getByText('Direct PydanticAI streaming')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Basic' })).toBeInTheDocument()
     expect(screen.getByText('Chat panel')).toBeInTheDocument()
-    expect(screen.getByText('Current flow history')).toBeInTheDocument()
+  })
+
+  it('shows a loading state while a saved conversation is being fetched', () => {
+    conversationMessagesState.data = undefined
+    conversationMessagesState.isError = false
+    conversationMessagesState.error = undefined
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/:flow/conversations/:conversationId" element={<FlowChatPage />} />
+      </Routes>,
+      ['/basic/conversations/conversation-1'],
+    )
+
+    expect(screen.getByText('Loading conversation...')).toBeInTheDocument()
+    expect(screen.queryByText('Chat panel')).not.toBeInTheDocument()
+  })
+
+  it('renders the chat panel after a saved conversation loads', () => {
+    conversationMessagesState.data = {
+      active_replay_id: null,
+      conversation_id: 'conversation-1',
+      flow_type: 'basic',
+      messages: [],
+    }
+    conversationMessagesState.isError = false
+    conversationMessagesState.error = undefined
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/:flow/conversations/:conversationId" element={<FlowChatPage />} />
+      </Routes>,
+      ['/basic/conversations/conversation-1'],
+    )
+
+    expect(screen.getByText('Chat panel')).toBeInTheDocument()
   })
 
   it('shows a not-found state for missing persisted conversations', () => {

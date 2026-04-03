@@ -10,7 +10,7 @@ import { math } from '@streamdown/math'
 import { mermaid } from '@streamdown/mermaid'
 import type { UIMessage } from 'ai'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import type { ComponentProps, HTMLAttributes, ReactElement } from 'react'
+import type { ComponentProps, ComponentType, HTMLAttributes, ReactElement } from 'react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Streamdown } from 'streamdown'
 
@@ -257,10 +257,11 @@ export const MessageBranchPage = ({ className, ...props }: MessageBranchPageProp
 export type MessageResponseProps = ComponentProps<typeof Streamdown>
 
 const streamdownPlugins = { cjk, code, math, mermaid }
+const StreamdownWithPlugins = Streamdown as unknown as ComponentType<MessageResponseProps & { plugins: typeof streamdownPlugins }>
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
+    <StreamdownWithPlugins
       className={cn('size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}
       plugins={streamdownPlugins}
       {...props}

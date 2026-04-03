@@ -167,11 +167,6 @@ export const FileTreeFolder = ({ path, name, className, children, ...props }: Fi
   )
 }
 
-interface FileTreeFileContextType {
-  path: string
-  name: string
-}
-
 const FileTreeFileContext = createContext({
   name: '',
   path: '',

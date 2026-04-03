@@ -1,10 +1,13 @@
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import { Part } from '@/Part'
 import { renderWithProviders } from '@/test/utils'
 
 describe('Part', () => {
-  it('renders a reasoning block', () => {
+  it('renders a reasoning block', async () => {
+    const user = userEvent.setup()
+
     renderWithProviders(
       <Part
         part={{ type: 'reasoning', text: 'Thinking through the answer', state: 'done' } as never}
@@ -15,6 +18,8 @@ describe('Part', () => {
         lastMessage
       />,
     )
+
+    await user.click(screen.getByRole('button', { name: /thought for a few seconds/i }))
 
     expect(screen.getByText('Thinking through the answer')).toBeInTheDocument()
   })

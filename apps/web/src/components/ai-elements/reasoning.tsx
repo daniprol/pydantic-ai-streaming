@@ -8,7 +8,7 @@ import { code } from '@streamdown/code'
 import { math } from '@streamdown/math'
 import { mermaid } from '@streamdown/mermaid'
 import { BrainIcon, ChevronDownIcon } from 'lucide-react'
-import type { ComponentProps, ReactNode } from 'react'
+import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 
@@ -175,6 +175,7 @@ export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & 
 }
 
 const streamdownPlugins = { cjk, code, math, mermaid }
+const StreamdownWithPlugins = Streamdown as unknown as ComponentType<ComponentProps<typeof Streamdown> & { plugins: typeof streamdownPlugins }>
 
 export const ReasoningContent = memo(({ className, children, ...props }: ReasoningContentProps) => (
   <CollapsibleContent
@@ -185,7 +186,7 @@ export const ReasoningContent = memo(({ className, children, ...props }: Reasoni
     )}
     {...props}
   >
-    <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+    <StreamdownWithPlugins plugins={streamdownPlugins}>{children}</StreamdownWithPlugins>
   </CollapsibleContent>
 ))
 

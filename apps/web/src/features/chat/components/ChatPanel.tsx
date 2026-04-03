@@ -3,11 +3,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@ai-sdk/react'
 
-import { Conversation, ConversationContent, ConversationScrollButton } from '@/components/ai-elements/conversation'
+import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
 import { chatQueryKeys } from '@/features/chat/api/queryKeys'
 import {
   PromptInput,
+  PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -18,10 +19,9 @@ import {
   PromptInputActionAddScreenshot,
 } from '@/components/ai-elements/prompt-input'
 import type { PromptInputMessage } from '@/components/ai-elements/prompt-input'
-import { Part } from '@/Part'
+import { ChatMessageParts } from '@/features/chat/components/MessagePart'
 import { createTransport } from '@/features/chat/lib/transports'
 import type { ConversationMessagesResponse, FlowType, UIConversationMessage } from '@/types/chat'
-import { PlusIcon, ArrowUp } from 'lucide-react'
 
 export function ChatPanel({
   flow,
@@ -52,7 +52,7 @@ export function ChatPanel({
     replayId: initialData?.active_replay_id ?? null,
   })
 
-  const { messages, sendMessage, status, error, regenerate } = useChat({
+  const { messages, sendMessage, status, error, regenerate, stop } = useChat({
     id: resolvedConversationId,
     messages: (initialData?.messages ?? []) as never,
     transport,
@@ -113,27 +113,30 @@ export function ChatPanel({
     })
   }
 
+  const chatMessages = messages as UIConversationMessage[]
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <Conversation className="flex-1 min-h-0">
         <ConversationContent className="mx-auto w-full max-w-3xl px-4 py-8">
-          {(messages as UIConversationMessage[]).map((message) => (
-            <div key={message.id} className="mb-6 last:mb-0">
-              {message.parts.map((part, index) => (
-                <Part
-                  key={`${message.id}-${index}`}
-                  part={part as never}
-                  message={message as never}
-                  status={status}
-                  index={index}
-                  regen={(messageId) => {
-                    regenerate({ messageId }).catch((regenError: unknown) => {
-                      console.error('Failed to regenerate message', regenError)
-                    })
-                  }}
-                  lastMessage={message.id === messages.at(-1)?.id}
-                />
-              ))}
+          {chatMessages.length === 0 && status === 'ready' && !isCreatingConversation && (
+            <ConversationEmptyState
+              description="Ask about an order, service health, or support policy."
+              title="Start a conversation"
+            />
+          )}
+          {chatMessages.map((message) => (
+            <div className="mb-6 last:mb-0" key={message.id}>
+              <ChatMessageParts
+                lastMessage={message.id === chatMessages.at(-1)?.id}
+                message={message}
+                regen={(messageId) => {
+                  regenerate({ messageId }).catch((regenError: unknown) => {
+                    console.error('Failed to regenerate message', regenError)
+                  })
+                }}
+                status={status}
+              />
             </div>
           ))}
           {status === 'submitted' && (
@@ -160,52 +163,42 @@ export function ChatPanel({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="sticky bottom-0 w-full bg-gradient-to-t from-background via-background/95 to-transparent pb-6 pt-4 px-4">
+      <div className="sticky bottom-0 w-full border-t border-border/50 bg-background/95 px-4 pt-4 pb-6 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="mx-auto max-w-3xl">
-          <div className="relative overflow-hidden rounded-[26px] border border-border/50 bg-muted/30 p-1 px-2 shadow-sm transition-all focus-within:border-border/80 focus-within:bg-background focus-within:ring-1 focus-within:ring-ring/10">
-            <PromptInput onSubmit={handleSubmit} className="border-none bg-transparent shadow-none">
-                <div className="flex w-full items-end gap-1.5 px-1 py-1">
-                    <PromptInputActionMenu>
-                        <PromptInputActionMenuTrigger className="size-8 rounded-full border-none hover:bg-muted/50">
-                            <PlusIcon className="size-4" />
-                        </PromptInputActionMenuTrigger>
-                        <PromptInputActionMenuContent>
-                            <PromptInputActionAddAttachments />
-                            <PromptInputActionAddScreenshot />
-                        </PromptInputActionMenuContent>
-                    </PromptInputActionMenu>
+          <PromptInput onSubmit={handleSubmit}>
+            <PromptInputTextarea
+              ref={textareaRef}
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value)
+                if (draftError) {
+                  setDraftError(null)
+                }
+              }}
+              className="max-h-40"
+              disabled={isCreatingConversation || status === 'submitted' || status === 'streaming'}
+              placeholder="Ask about an order, service health, or support policy..."
+            />
 
-                    <PromptInputTextarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={(event) => {
-                            setInput(event.target.value)
-                            if (draftError) {
-                                setDraftError(null)
-                            }
-                        }}
-                        className="min-h-[40px] max-h-60 flex-1 border-none bg-transparent py-2.5 text-[15px] focus-visible:ring-0"
-                        disabled={isCreatingConversation || status === 'submitted' || status === 'streaming'}
-                        placeholder="Message Pydantic AI..."
-                    />
-
-                    <PromptInputSubmit
-                        disabled={!input.trim() || isCreatingConversation}
-                        status={isCreatingConversation ? 'submitted' : status}
-                        className="size-8 rounded-full bg-foreground text-background hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground flex items-center justify-center p-0 transition-all duration-200 shadow-sm"
-                    >
-                        <ArrowUp className="size-[18px]" strokeWidth={3} />
-                    </PromptInputSubmit>
-                </div>
-            </PromptInput>
-          </div>
-          <p className="mt-3 text-center text-[10px] text-muted-foreground/40 font-medium tracking-tight">
-            Pydantic AI Lab • Experimental UI
-          </p>
+            <PromptInputFooter>
+              <PromptInputTools>
+                <PromptInputActionMenu>
+                  <PromptInputActionMenuTrigger />
+                  <PromptInputActionMenuContent>
+                    <PromptInputActionAddAttachments />
+                    <PromptInputActionAddScreenshot />
+                  </PromptInputActionMenuContent>
+                </PromptInputActionMenu>
+              </PromptInputTools>
+              <PromptInputSubmit
+                disabled={isCreatingConversation || (!input.trim() && status !== 'submitted' && status !== 'streaming')}
+                onStop={conversationId ? stop : undefined}
+                status={isCreatingConversation ? 'submitted' : status}
+              />
+            </PromptInputFooter>
+          </PromptInput>
         </div>
       </div>
     </div>
   )
 }
-
-

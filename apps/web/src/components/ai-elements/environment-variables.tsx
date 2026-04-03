@@ -97,11 +97,6 @@ export const EnvironmentVariablesContent = ({ className, children, ...props }: E
   </div>
 )
 
-interface EnvironmentVariableContextType {
-  name: string
-  value: string
-}
-
 const EnvironmentVariableContext = createContext({
   name: '',
   value: '',

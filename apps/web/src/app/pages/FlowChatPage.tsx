@@ -5,6 +5,7 @@ import { ChatPanel } from '@/features/chat/components/ChatPanel'
 import { FLOWS, isFlow } from '@/features/chat/lib/flows'
 import { useConversationMessages, useConversations, useDeleteConversation } from '@/features/conversations/hooks/useConversations'
 import { AppSidebar } from '@/components/app-sidebar'
+import { Loader } from '@/components/ai-elements/loader'
 import { ChatLayout } from '@/components/ChatLayout'
 
 export function FlowChatPage() {
@@ -17,6 +18,7 @@ export function FlowChatPage() {
   const messagesQuery = useConversationMessages(flow, conversationId)
   const deleteMutation = useDeleteConversation(flow)
   const activeFlow = FLOWS.find((entry) => entry.id === flow)!
+  const isConversationLoading = Boolean(conversationId) && !messagesQuery.data && !messagesQuery.isError
   const conversationMissing =
     Boolean(conversationId) &&
     messagesQuery.isError &&
@@ -79,15 +81,22 @@ export function FlowChatPage() {
 
   return (
     <ChatLayout sidebar={sidebar} title={activeFlow.label}>
-      <ChatPanel
-        key={`${flow}-${conversationId ?? 'draft'}`}
-        flow={flow}
-        conversationId={conversationId}
-        initialData={messagesQuery.data}
-        initialPrompt={typeof initialPrompt === 'string' ? initialPrompt : undefined}
-        onInitialPromptConsumed={handleInitialPromptConsumed}
-        onStartConversation={handleStartConversation}
-      />
+      {isConversationLoading ? (
+        <div className="flex flex-1 items-center justify-center gap-3 text-muted-foreground text-sm">
+          <Loader />
+          <span>Loading conversation...</span>
+        </div>
+      ) : (
+        <ChatPanel
+          key={`${flow}-${conversationId ?? 'draft'}`}
+          flow={flow}
+          conversationId={conversationId}
+          initialData={messagesQuery.data}
+          initialPrompt={typeof initialPrompt === 'string' ? initialPrompt : undefined}
+          onInitialPromptConsumed={handleInitialPromptConsumed}
+          onStartConversation={handleStartConversation}
+        />
+      )}
     </ChatLayout>
   )
 }
