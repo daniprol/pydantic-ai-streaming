@@ -26,6 +26,7 @@ from streaming_chat_api.services.common import (
     load_message_history,
     parse_chat_request,
     persist_assistant_messages,
+    run_dbos_adapter_stream,
 )
 
 
@@ -90,6 +91,8 @@ async def stream_chat(
         await append_user_message(repository, conversation, parsed_request.new_message)
     await session.commit()
 
+    # The DBOS agent still uses the Vercel adapter for request parsing and SSE
+    # encoding, but the actual run must go through the DBOS-specific bridge.
     adapter = build_adapter(request_body, request.headers.get('accept'), resources.agents.dbos)
     deps = build_agent_dependencies(resources, conversation)
 
@@ -101,7 +104,10 @@ async def stream_chat(
             result=result,
         )
 
-    stream = adapter.run_stream(
+    # `run_stream_events()` is unsupported for DBOS agents, so we convert the
+    # DBOS callback-based event stream into the async iterator shape the adapter expects.
+    stream = run_dbos_adapter_stream(
+        adapter=adapter,
         message_history=history,
         deferred_tool_results=parsed_request.deferred_tool_results,
         deps=deps,

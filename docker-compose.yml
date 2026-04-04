@@ -9,6 +9,7 @@ services:
       - '5173:5173'
     volumes:
       - ./apps/web:/workspace/apps/web
+      - web-node-modules:/workspace/apps/web/node_modules
     depends_on:
       - api
 
@@ -22,6 +23,7 @@ services:
       - '8000:8000'
     volumes:
       - ./apps/api:/workspace/apps/api
+      - api-venv:/workspace/apps/api/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,6 +41,7 @@ services:
       - apps/api/.env
     volumes:
       - ./apps/api:/workspace/apps/api
+      - temporal-worker-venv:/workspace/apps/api/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,3 +96,6 @@ services:
 
 volumes:
   postgres-data:
+  api-venv:
+  temporal-worker-venv:
+  web-node-modules:

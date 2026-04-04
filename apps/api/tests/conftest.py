@@ -54,8 +54,8 @@ async def build_test_resources(settings: Settings) -> AsyncIterator[AppResources
 
     http_client = httpx.AsyncClient()
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    support_client = FakeSupportClient(http_client)
-    support_agent = build_support_agent(settings)
+    support_client = FakeSupportClient()
+    support_agent = build_support_agent(settings, support_client)
     resources = AppResources(
         settings=settings,
         engine=engine,
@@ -339,7 +339,6 @@ def agent_deps_factory(resources: AppResources):
     def factory(*, conversation_id: str = 'conversation-1') -> AgentDependencies:
         return AgentDependencies(
             conversation_id=conversation_id,
-            support_client=resources.support_client,
         )
 
     return factory

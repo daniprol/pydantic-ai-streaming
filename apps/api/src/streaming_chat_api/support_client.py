@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-from random import Random
-
-import httpx
-
 
 class FakeSupportClient:
-    def __init__(self, http_client: httpx.AsyncClient):
-        self._http_client = http_client
-        self._rng = Random(7)
-
     async def lookup_order_status(self, order_id: str) -> dict[str, str]:
         statuses = ['processing', 'awaiting-shipment', 'delivered']
-        status = statuses[self._rng.randint(0, len(statuses) - 1)]
+        status = statuses[sum(order_id.encode('utf-8')) % len(statuses)]
         return {
             'order_id': order_id,
             'status': status,

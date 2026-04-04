@@ -27,6 +27,7 @@ from streaming_chat_api.services.common import (
     load_message_history,
     parse_chat_request,
     persist_assistant_messages,
+    run_dbos_adapter_stream,
 )
 
 
@@ -106,7 +107,8 @@ async def stream_chat(
             clear_active_replay_id=True,
         )
 
-    stream = adapter.run_stream(
+    stream = run_dbos_adapter_stream(
+        adapter=adapter,
         message_history=history,
         deferred_tool_results=parsed_request.deferred_tool_results,
         deps=deps,

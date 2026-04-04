@@ -47,8 +47,8 @@ def build_e2e_app() -> FastAPI:
 
         http_client = httpx.AsyncClient()
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        support_client = FakeSupportClient(http_client)
-        support_agent = build_support_agent(settings)
+        support_client = FakeSupportClient()
+        support_agent = build_support_agent(settings, support_client)
         resources = AppResources(
             settings=settings,
             engine=engine,

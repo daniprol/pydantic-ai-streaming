@@ -4,7 +4,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from streaming_chat_api.dependencies import PaginationDep, ResourcesDep, SessionDep
+from streaming_chat_api.dependencies import (
+    LastEventIdDep,
+    PaginationDep,
+    ResourcesDep,
+    SessionDep,
+)
 from streaming_chat_api.schemas import (
     ConversationCreateResponse,
     ConversationListResponse,
@@ -65,10 +70,7 @@ async def chat(
 @router.get('/streams/{replay_id}/replay')
 async def replay_stream(
     replay_id: str,
-    request: Request,
     resources: ResourcesDep,
+    last_event_id: LastEventIdDep,
 ):
-    last_event_id = request.query_params.get('last_event_id') or request.headers.get(
-        'last-event-id'
-    )
     return replay_stream_response(resources.replay_broker.replay_stream(replay_id, last_event_id))

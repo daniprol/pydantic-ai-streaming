@@ -85,3 +85,25 @@ def test_settings_normalize_local_postgres_host_for_local_execution() -> None:
         database_url='postgresql+asyncpg://postgres:postgres@postgres:5432/app'
     )
     assert '127.0.0.1' in settings.database_url
+
+
+def test_settings_normalize_local_redis_host_for_local_execution() -> None:
+    settings = build_settings(redis_url='redis://redis:6379/0')
+    assert settings.redis_url == 'redis://127.0.0.1:6379/0'
+
+
+def test_settings_normalize_local_temporal_host_for_local_execution() -> None:
+    settings = build_settings(temporal_target_host='temporal:7233')
+    assert settings.temporal_target_host == '127.0.0.1:7233'
+
+
+def test_settings_keep_container_hosts_when_running_in_docker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr('streaming_chat_api.settings.is_running_in_docker', lambda: True)
+    settings = build_settings(
+        redis_url='redis://redis:6379/0',
+        temporal_target_host='temporal:7233',
+    )
+    assert settings.redis_url == 'redis://redis:6379/0'
+    assert settings.temporal_target_host == 'temporal:7233'

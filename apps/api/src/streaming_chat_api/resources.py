@@ -42,16 +42,25 @@ class AppResources:
     dbos_initialized: bool
 
 
-def build_agents(settings: Settings) -> ChatAgents:
+def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatAgents:
     from pydantic_ai.durable_exec.dbos import DBOSAgent
     from pydantic_ai.durable_exec.temporal import TemporalAgent
+    from streaming_chat_api.services.common import stream_dbos_events
 
-    support_agent = build_support_agent(settings)
+    support_agent = build_support_agent(settings, support_client)
     return ChatAgents(
         basic=support_agent,
-        dbos=DBOSAgent(support_agent, name='support-assistant-dbos'),
+        dbos=DBOSAgent(
+            support_agent,
+            name='support-assistant-dbos',
+            event_stream_handler=stream_dbos_events,
+        ),
         temporal=TemporalAgent(support_agent, name='support-assistant-temporal'),
-        dbos_replay=DBOSAgent(support_agent, name='support-assistant-dbos-replay'),
+        dbos_replay=DBOSAgent(
+            support_agent,
+            name='support-assistant-dbos-replay',
+            event_stream_handler=stream_dbos_events,
+        ),
     )
 
 
@@ -61,8 +70,8 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
     session_factory = create_session_factory(engine)
     http_client = httpx.AsyncClient(timeout=30.0)
     redis_client = redis.from_url(resolved_settings.redis_url, decode_responses=True)
-    support_client = FakeSupportClient(http_client)
-    agents = build_agents(resolved_settings)
+    support_client = FakeSupportClient()
+    agents = build_agents(resolved_settings, support_client)
 
     temporal_client: TemporalClient | None = None
     try:

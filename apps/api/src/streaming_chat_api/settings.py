@@ -14,6 +14,8 @@ API_DIR = Path(__file__).resolve().parents[2]
 API_ENV_FILE = API_DIR / '.env'
 LOCAL_SERVICE_HOSTS = {
     'postgres': '127.0.0.1',
+    'redis': '127.0.0.1',
+    'temporal': '127.0.0.1',
 }
 
 
@@ -31,6 +33,21 @@ def normalize_local_service_url(url: str) -> str:
         return url
 
     return parsed_url.set(host=local_host).render_as_string(hide_password=False)
+
+
+def normalize_local_service_target(target: str) -> str:
+    if is_running_in_docker():
+        return target
+
+    host, separator, remainder = target.partition(':')
+    local_host = LOCAL_SERVICE_HOSTS.get(host)
+    if local_host is None:
+        return target
+
+    if not separator:
+        return local_host
+
+    return f'{local_host}:{remainder}'
 
 
 class Settings(BaseSettings):
@@ -103,10 +120,15 @@ class Settings(BaseSettings):
 
         return origins
 
-    @field_validator('database_url', 'dbos_system_database_url', mode='after')
+    @field_validator('database_url', 'dbos_system_database_url', 'redis_url', mode='after')
     @classmethod
     def normalize_database_hosts(cls, value: str) -> str:
         return normalize_local_service_url(value)
+
+    @field_validator('temporal_target_host', mode='after')
+    @classmethod
+    def normalize_temporal_host(cls, value: str) -> str:
+        return normalize_local_service_target(value)
 
     @field_validator(
         'azure_openai_endpoint',
