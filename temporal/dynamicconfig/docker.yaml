@@ -1,0 +1,6 @@
+frontend.WorkerHeartbeatsEnabled:
+  - value: true
+    constraints: {}
+frontend.ListWorkersEnabled:
+  - value: true
+    constraints: {}

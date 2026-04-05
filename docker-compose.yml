@@ -71,8 +71,10 @@ services:
     ports:
       - '6379:6379'
 
+  # Local dev: use auto-setup so Temporal creates its schema/default namespace for us.
+  # Production: use temporalio/server and run schema setup/migrations + namespace creation separately.
   temporal:
-    image: temporalio/auto-setup:1.25.2
+    image: temporalio/auto-setup:1.29.1
     environment:
       DB: postgres12
       DB_PORT: 5432
@@ -81,6 +83,8 @@ services:
       POSTGRES_SEEDS: postgres
     ports:
       - '7233:7233'
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
     depends_on:
       postgres:
         condition: service_healthy
