@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.117.1",
     "httpx>=0.28.1",
     "orjson>=3.11.3",
+    "pydantic-ai-absurd",
     "pydantic-ai-slim[dbos,mcp,openai,temporal]>=1.18.0",
     "pydantic-settings>=2.11.0",
     "python-dotenv>=1.1.1",
@@ -56,3 +57,6 @@ line-length = 100
 [tool.ruff.format]
 quote-style = "single"
 docstring-code-format = false
+
+[tool.uv.sources]
+pydantic-ai-absurd = { workspace = true }

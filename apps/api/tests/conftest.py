@@ -66,6 +66,7 @@ async def build_test_resources(settings: Settings) -> AsyncIterator[AppResources
         support_client=support_client,
         agents=ChatAgents(
             basic=support_agent,
+            absurd=support_agent,
             dbos=support_agent,
             temporal=support_agent,
             dbos_replay=support_agent,

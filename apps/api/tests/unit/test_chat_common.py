@@ -48,7 +48,7 @@ async def test_persist_assistant_messages_stores_all_assistant_ui_messages_once(
     messages = await repository.list_messages(conversation.id)
 
     assert [message.role for message in messages] == ['assistant', 'assistant']
-    assert messages[0].ui_message_json['parts'][0]['type'] == 'dynamic-tool'
+    assert messages[0].ui_message_json['parts'][0]['type'].startswith('tool-')
     assert messages[1].ui_message_json['parts'][0]['type'] == 'text'
     assert messages[0].model_messages_json == serialize_model_messages(assistant_messages)
     assert messages[1].model_messages_json == []

@@ -7,10 +7,13 @@ from datetime import datetime, timezone
 import httpx
 import redis.asyncio as redis
 from dbos import DBOS
+from absurd_sdk import AsyncAbsurd
 from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from temporalio.client import Client as TemporalClient
+
+from pydantic_ai_absurd import AbsurdAgent
 
 from streaming_chat_api.agents import build_support_agent
 from streaming_chat_api.database import create_engine, create_session_factory
@@ -22,6 +25,7 @@ from streaming_chat_api.support_client import FakeSupportClient
 @dataclass(slots=True)
 class ChatAgents:
     basic: object
+    absurd: object
     dbos: object
     temporal: object
     dbos_replay: object
@@ -45,11 +49,19 @@ class AppResources:
 def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatAgents:
     from pydantic_ai.durable_exec.dbos import DBOSAgent
     from pydantic_ai.durable_exec.temporal import TemporalAgent
-    from streaming_chat_api.services.common import stream_dbos_events
+    from streaming_chat_api.services.common import stream_callback_events, stream_dbos_events
 
     support_agent = build_support_agent(settings, support_client)
+    absurd_queue_name = f'{settings.app_name}-absurd'
+    absurd_app = AsyncAbsurd(settings.dbos_system_database_url, queue_name=absurd_queue_name)
     return ChatAgents(
         basic=support_agent,
+        absurd=AbsurdAgent(
+            absurd_app,
+            support_agent,
+            name='support-assistant-absurd',
+            event_stream_handler=stream_callback_events,
+        ),
         dbos=DBOSAgent(
             support_agent,
             name='support-assistant-dbos',

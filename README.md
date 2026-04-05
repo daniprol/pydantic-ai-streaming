@@ -1,9 +1,10 @@
 # Streaming Chat Workspace
 
-This repository now contains a pnpm workspace frontend and a uv-managed FastAPI backend:
+This repository now contains a pnpm workspace frontend plus a uv workspace for the Python backend and libraries:
 
 - `apps/web`: Vite + React + Vercel AI SDK UI
 - `apps/api`: FastAPI + PydanticAI + SQLAlchemy + Alembic
+- `packages/pydantic-ai-absurd`: lightweight Absurd durable execution wrapper for PydanticAI
 
 ## Environment files
 
@@ -16,8 +17,15 @@ This repository now contains a pnpm workspace frontend and a uv-managed FastAPI 
 Backend:
 
 ```sh
-uv sync --project apps/api
-uv run --project apps/api uvicorn streaming_chat_api.main:app --reload --port 8000
+uv sync --all-packages
+uv run --package streaming-chat-api uvicorn streaming_chat_api.main:app --reload --port 8000
+```
+
+Absurd library:
+
+```sh
+uv run --package pydantic-ai-absurd pytest packages/pydantic-ai-absurd/tests -s
+uv build --package pydantic-ai-absurd --no-sources
 ```
 
 Frontend:

@@ -60,9 +60,10 @@ class _StreamFailure:
 
 _STREAM_COMPLETE = object()
 REPLAY_ID_HEADER = 'x-replay-id'
-_dbos_stream_queue: ContextVar[
+_callback_stream_queue: ContextVar[
     asyncio.Queue[AgentStreamEvent | AgentRunResultEvent[str] | _StreamFailure | object] | None
-] = ContextVar('dbos_stream_queue', default=None)
+] = ContextVar('callback_stream_queue', default=None)
+_dbos_stream_queue = _callback_stream_queue
 
 
 def serialize_model_messages(messages: Sequence[ModelMessage]) -> list[dict[str, Any]]:
@@ -290,13 +291,17 @@ async def build_replayable_streaming_response(
     )
 
 
-async def stream_dbos_events(_: Any, event_stream: Any) -> None:
-    queue = _dbos_stream_queue.get()
+async def stream_callback_events(_: Any, event_stream: Any) -> None:
+    queue = _callback_stream_queue.get()
     if queue is None:  # pragma: no cover - indicates incorrect bridge setup
-        raise RuntimeError('DBOS event stream queue is not configured.')
+        raise RuntimeError('Callback event stream queue is not configured.')
 
     async for event in event_stream:
         await queue.put(event)
+
+
+async def stream_dbos_events(_: Any, event_stream: Any) -> None:
+    await stream_callback_events(_, event_stream)
 
 
 def _has_text_content(event: AgentStreamEvent) -> bool:
@@ -307,15 +312,16 @@ def _has_text_content(event: AgentStreamEvent) -> bool:
     return False
 
 
-def run_dbos_adapter_stream(
+def run_callback_adapter_stream(
     *,
     adapter: VercelAIAdapter,
     message_history: Sequence[ModelMessage] | None,
     deferred_tool_results: DeferredToolResults | None,
     deps: AgentDependencies,
     on_complete: Any = None,
+    runtime_event_stream_handler: Any = None,
 ):
-    # DBOS exposes streaming via an event-stream handler callback, while the Vercel
+    # Durable agents expose streaming via an event-stream handler callback, while the Vercel
     # adapter expects an async iterator. The queue bridges those two interfaces and
     # keeps a little buffering/backpressure between the workflow and the HTTP stream.
     queue: asyncio.Queue[AgentStreamEvent | AgentRunResultEvent[str] | _StreamFailure | object] = (
@@ -324,19 +330,22 @@ def run_dbos_adapter_stream(
     all_messages = [*(message_history or []), *adapter.messages]
 
     async def run_agent() -> None:
-        token = _dbos_stream_queue.set(queue)
+        token = _callback_stream_queue.set(queue)
         try:
-            result = await adapter.agent.run(
-                message_history=all_messages,
-                deferred_tool_results=deferred_tool_results,
-                deps=deps,
-                event_stream_handler=stream_dbos_events,
-            )
+            run_kwargs: dict[str, Any] = {
+                'message_history': all_messages,
+                'deferred_tool_results': deferred_tool_results,
+                'deps': deps,
+            }
+            if runtime_event_stream_handler is not None:
+                run_kwargs['event_stream_handler'] = runtime_event_stream_handler
+
+            result = await adapter.agent.run(**run_kwargs)
             await queue.put(AgentRunResultEvent(result))
         except Exception as exc:
             await queue.put(_StreamFailure(exc))
         finally:
-            _dbos_stream_queue.reset(token)
+            _callback_stream_queue.reset(token)
             await queue.put(_STREAM_COMPLETE)
 
     async def native_stream():
@@ -373,3 +382,38 @@ def run_dbos_adapter_stream(
                     await task
 
     return adapter.transform_stream(native_stream(), on_complete=on_complete)
+
+
+def run_dbos_adapter_stream(
+    *,
+    adapter: VercelAIAdapter,
+    message_history: Sequence[ModelMessage] | None,
+    deferred_tool_results: DeferredToolResults | None,
+    deps: AgentDependencies,
+    on_complete: Any = None,
+):
+    return run_callback_adapter_stream(
+        adapter=adapter,
+        message_history=message_history,
+        deferred_tool_results=deferred_tool_results,
+        deps=deps,
+        on_complete=on_complete,
+        runtime_event_stream_handler=stream_dbos_events,
+    )
+
+
+def run_absurd_adapter_stream(
+    *,
+    adapter: VercelAIAdapter,
+    message_history: Sequence[ModelMessage] | None,
+    deferred_tool_results: DeferredToolResults | None,
+    deps: AgentDependencies,
+    on_complete: Any = None,
+):
+    return run_callback_adapter_stream(
+        adapter=adapter,
+        message_history=message_history,
+        deferred_tool_results=deferred_tool_results,
+        deps=deps,
+        on_complete=on_complete,
+    )

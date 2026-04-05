@@ -20,7 +20,6 @@ from pydantic_ai.durable_exec.temporal import AgentPlugin, PydanticAIPlugin
 from streaming_chat_api.resources import build_agents
 from streaming_chat_api.settings import Settings, get_settings
 from streaming_chat_api.support_client import FakeSupportClient
-from streaming_chat_api.temporal_workflow import SupportWorkflow
 
 
 logger = logging.getLogger(__name__)
@@ -85,6 +84,8 @@ async def connect_temporal_client(settings: Settings, temporal_agent: object) ->
 
 
 async def main() -> None:
+    from streaming_chat_api.temporal_workflow import SupportWorkflow
+
     settings = get_settings()
     agents = build_agents(settings, FakeSupportClient())
 
