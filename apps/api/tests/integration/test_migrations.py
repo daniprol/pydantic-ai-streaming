@@ -57,9 +57,17 @@ async def test_alembic_migration_creates_chat_tables(postgres_dsn: str) -> None:
                     )
                 )
             )
+            flow_values = list(
+                await connection.scalars(
+                    text(
+                        "select enumlabel from pg_enum join pg_type on pg_enum.enumtypid = pg_type.oid where pg_type.typname = 'flow_type' order by enumsortorder"
+                    )
+                )
+            )
 
         assert 'alembic_version' in tables
         assert 'chat_conversation' in tables
         assert 'chat_message' in tables
+        assert set(flow_values) == {'basic', 'absurd', 'dbos', 'temporal', 'dbos-replay'}
     finally:
         await engine.dispose()

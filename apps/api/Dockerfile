@@ -7,20 +7,18 @@ ENV UV_COMPILE_BYTECODE=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /workspace/apps/api
+WORKDIR /workspace
 
-COPY apps/api/pyproject.toml apps/api/uv.lock* ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-install-project
-
-COPY apps/api ./
+COPY pyproject.toml uv.lock ./
+COPY apps/api apps/api
+COPY packages/pydantic-ai-absurd packages/pydantic-ai-absurd
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+    uv sync --locked --no-dev --package streaming-chat-api
 
 RUN useradd --create-home appuser && chown -R appuser:appuser /workspace
 USER appuser
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "streaming_chat_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--package", "streaming-chat-api", "uvicorn", "streaming_chat_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

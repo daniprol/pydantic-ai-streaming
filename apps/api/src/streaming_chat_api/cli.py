@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 
-FlowType = Literal['basic', 'dbos', 'temporal', 'dbos-replay']
+FlowType = Literal['basic', 'absurd', 'dbos', 'temporal', 'dbos-replay']
 REPLAYABLE_FLOWS = {'temporal', 'dbos-replay'}
 ROLE_STYLES = {
     'user': 'bold cyan',
@@ -634,7 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '-m',
         '--mode',
-        choices=['basic', 'dbos', 'temporal', 'dbos-replay'],
+        choices=['basic', 'absurd', 'dbos', 'temporal', 'dbos-replay'],
         default='basic',
         help='Chat flow to use.',
     )

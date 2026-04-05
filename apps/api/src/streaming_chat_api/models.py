@@ -18,6 +18,7 @@ def utcnow() -> datetime:
 
 class FlowType(StrEnum):
     BASIC = 'basic'
+    ABSURD = 'absurd'
     DBOS = 'dbos'
     TEMPORAL = 'temporal'
     DBOS_REPLAY = 'dbos-replay'

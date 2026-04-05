@@ -38,6 +38,8 @@ logs/
 # Temp
 scratch/
 tmp/
+__pycache__/
+*.py[cod]
 
 # Database
 *.db

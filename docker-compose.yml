@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     env_file:
-      - apps/web/.env
+      - apps/web/.env.example
     ports:
       - '5173:5173'
     volumes:
@@ -18,12 +18,38 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     env_file:
-      - apps/api/.env
+      - apps/api/.env.example
     ports:
       - '8000:8000'
     volumes:
       - ./apps/api:/workspace/apps/api
-      - api-venv:/workspace/apps/api/.venv
+      - ./packages/pydantic-ai-absurd:/workspace/packages/pydantic-ai-absurd
+      - ./pyproject.toml:/workspace/pyproject.toml:ro
+      - ./uv.lock:/workspace/uv.lock:ro
+      - api-venv:/workspace/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      temporal:
+        condition: service_started
+      absurd-bootstrap:
+        condition: service_completed_successfully
+
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ['uv', 'run', '--package', 'streaming-chat-api', 'python', '-m', 'streaming_chat_api.temporal_worker']
+    env_file:
+      - apps/api/.env.example
+    volumes:
+      - ./apps/api:/workspace/apps/api
+      - ./packages/pydantic-ai-absurd:/workspace/packages/pydantic-ai-absurd
+      - ./pyproject.toml:/workspace/pyproject.toml:ro
+      - ./uv.lock:/workspace/uv.lock:ro
+      - temporal-worker-venv:/workspace/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,23 +58,55 @@ services:
       temporal:
         condition: service_started
 
-  temporal-worker:
+  absurd-bootstrap:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
-    command: ['uv', 'run', 'python', '-m', 'streaming_chat_api.temporal_worker']
+      dockerfile: docker/Dockerfile-absurd-tools
     env_file:
-      - apps/api/.env
-    volumes:
-      - ./apps/api:/workspace/apps/api
-      - temporal-worker-venv:/workspace/apps/api/.venv
+      - apps/api/.env.example
+    command:
+      [
+        'sh',
+        '-lc',
+        'export PGDATABASE="$$DBOS_SYSTEM_DATABASE_URL" && (absurdctl schema-version >/dev/null 2>&1 && absurdctl migrate || absurdctl init) && (absurdctl create-queue "$$ABSURD_QUEUE_NAME" >/dev/null 2>&1 || true)',
+      ]
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_started
-      temporal:
-        condition: service_started
+
+  absurd-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ['uv', 'run', '--package', 'streaming-chat-api', 'python', '-m', 'streaming_chat_api.absurd_worker']
+    env_file:
+      - apps/api/.env.example
+    volumes:
+      - ./apps/api:/workspace/apps/api
+      - ./packages/pydantic-ai-absurd:/workspace/packages/pydantic-ai-absurd
+      - ./pyproject.toml:/workspace/pyproject.toml:ro
+      - ./uv.lock:/workspace/uv.lock:ro
+      - absurd-worker-venv:/workspace/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      absurd-bootstrap:
+        condition: service_completed_successfully
+
+  habitat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile-habitat
+    env_file:
+      - apps/api/.env.example
+    command: ['sh', '-lc', 'exec habitat run -db-url "$$DBOS_SYSTEM_DATABASE_URL" -listen ":7890"']
+    ports:
+      - '7890:7890'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      absurd-bootstrap:
+        condition: service_completed_successfully
 
   postgres:
     image: postgres:17
@@ -98,4 +156,5 @@ volumes:
   postgres-data:
   api-venv:
   temporal-worker-venv:
+  absurd-worker-venv:
   web-node-modules:

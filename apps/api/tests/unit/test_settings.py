@@ -122,3 +122,8 @@ def test_settings_keep_container_hosts_when_running_in_docker(
     )
     assert settings.redis_url == 'redis://redis:6379/0'
     assert settings.temporal_target_host == 'temporal:7233'
+
+
+def test_settings_support_absurd_queue_autocreate_flag() -> None:
+    settings = build_settings(absurd_create_queue_if_not_exists=True)
+    assert settings.absurd_create_queue_if_not_exists is True

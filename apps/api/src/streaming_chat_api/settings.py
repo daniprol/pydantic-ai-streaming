@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     temporal_connect_attempts: int = Field(default=10, ge=1)
 
     dbos_system_database_url: str = 'postgresql://postgres:postgres@localhost:5432/streaming_chat'
+    absurd_queue_name: str = 'streaming-chat-api-absurd'
+    absurd_create_queue_if_not_exists: bool = False
+    absurd_worker_concurrency: int = Field(default=4, ge=1)
 
     azure_openai_endpoint: str = Field(default='https://example.openai.azure.com/')
     azure_openai_api_key: str = Field(default='test-key')
@@ -153,6 +156,13 @@ class Settings(BaseSettings):
             raise ValueError('value must not be empty')
         return value
 
+    @field_validator('absurd_queue_name', mode='after')
+    @classmethod
+    def validate_absurd_queue_name(cls, value: str) -> str:
+        if not value:
+            raise ValueError('absurd_queue_name must not be empty')
+        return value
+
     @field_validator(
         'temporal_target_host',
         'temporal_namespace',
@@ -161,6 +171,7 @@ class Settings(BaseSettings):
         'azure_openai_api_key',
         'openai_api_version',
         'azure_openai_model',
+        'absurd_queue_name',
         mode='before',
     )
     @classmethod

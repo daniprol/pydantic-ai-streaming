@@ -50,6 +50,7 @@ class FakeAsyncAbsurd:
         self._registry: dict[str, dict[str, Any]] = {}
         self._runs: dict[str, dict[str, Any]] = {}
         self.last_context: FakeTaskContext | None = None
+        self.spawn_count = 0
 
     def register_task(self, name: str, queue: str | None = None):
         def decorator(
@@ -63,6 +64,7 @@ class FakeAsyncAbsurd:
     async def spawn(
         self, task_name: str, params: Any, **_: Any
     ) -> dict[str, str | int]:
+        self.spawn_count += 1
         task_id = f"task-{uuid4()}"
         run_id = f"run-{uuid4()}"
         self._runs[task_id] = {

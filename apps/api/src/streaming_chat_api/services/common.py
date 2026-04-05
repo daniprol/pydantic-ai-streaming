@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from json import JSONDecodeError
 from contextlib import suppress
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 from uuid import uuid4
 
@@ -35,7 +35,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from streaming_chat_api.agents import AgentDependencies
 from streaming_chat_api.models import Conversation, FlowType
 from streaming_chat_api.repository import ConversationRepository
-from streaming_chat_api.resources import AppResources
 from streaming_chat_api.schemas import (
     ChatRequestEnvelope,
     ConversationCreateResponse,
@@ -44,6 +43,9 @@ from streaming_chat_api.schemas import (
     ConversationSummary,
     OffsetPaginationParams,
 )
+
+if TYPE_CHECKING:
+    from streaming_chat_api.resources import AppResources
 from streaming_chat_api.ui import replay_stream_response
 
 

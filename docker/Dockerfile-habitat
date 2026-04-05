@@ -1,0 +1,25 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ARG TARGETARCH
+ARG ABSURD_VERSION=0.3.0
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN case "$TARGETARCH" in \
+        amd64) asset='habitat-linux-x86_64' ;; \
+        arm64) asset='habitat-linux-arm64' ;; \
+        *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl --fail --location --silent --show-error \
+        "https://github.com/earendil-works/absurd/releases/download/${ABSURD_VERSION}/${asset}" \
+        --output /usr/local/bin/habitat \
+    && chmod +x /usr/local/bin/habitat
+
+RUN useradd --create-home --system appuser
+USER appuser
+
+EXPOSE 7890
+
+CMD ["habitat", "run"]

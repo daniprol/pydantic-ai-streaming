@@ -18,6 +18,7 @@ from pydantic_ai_absurd import AbsurdAgent
 from streaming_chat_api.agents import build_support_agent
 from streaming_chat_api.database import create_engine, create_session_factory
 from streaming_chat_api.replay import ReplayStreamBroker
+from streaming_chat_api.services.absurd import build_absurd_on_complete, ensure_absurd_queue
 from streaming_chat_api.settings import Settings, get_settings
 from streaming_chat_api.support_client import FakeSupportClient
 
@@ -46,14 +47,19 @@ class AppResources:
     dbos_initialized: bool
 
 
-def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatAgents:
+def build_agents(
+    settings: Settings,
+    support_client: FakeSupportClient,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> ChatAgents:
     from pydantic_ai.durable_exec.dbos import DBOSAgent
     from pydantic_ai.durable_exec.temporal import TemporalAgent
     from streaming_chat_api.services.common import stream_callback_events, stream_dbos_events
 
     support_agent = build_support_agent(settings, support_client)
-    absurd_queue_name = f'{settings.app_name}-absurd'
-    absurd_app = AsyncAbsurd(settings.dbos_system_database_url, queue_name=absurd_queue_name)
+    absurd_app = AsyncAbsurd(
+        settings.dbos_system_database_url, queue_name=settings.absurd_queue_name
+    )
     return ChatAgents(
         basic=support_agent,
         absurd=AbsurdAgent(
@@ -61,6 +67,7 @@ def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatA
             support_agent,
             name='support-assistant-absurd',
             event_stream_handler=stream_callback_events,
+            on_complete=build_absurd_on_complete(session_factory) if session_factory else None,
         ),
         dbos=DBOSAgent(
             support_agent,
@@ -83,7 +90,14 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
     http_client = httpx.AsyncClient(timeout=30.0)
     redis_client = redis.from_url(resolved_settings.redis_url, decode_responses=True)
     support_client = FakeSupportClient()
-    agents = build_agents(resolved_settings, support_client)
+    agents = build_agents(resolved_settings, support_client, session_factory)
+    absurd_agent = agents.absurd
+    if isinstance(absurd_agent, AbsurdAgent):
+        await ensure_absurd_queue(
+            absurd_agent.app,
+            queue_name=resolved_settings.absurd_queue_name,
+            create_if_not_exists=resolved_settings.absurd_create_queue_if_not_exists,
+        )
 
     temporal_client: TemporalClient | None = None
     try:
@@ -123,6 +137,9 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
 
 
 async def close_resources(resources: AppResources) -> None:
+    absurd_agent = resources.agents.absurd
+    if isinstance(absurd_agent, AbsurdAgent):
+        await absurd_agent.app.close()
     await resources.http_client.aclose()
     await resources.redis.aclose()
     await resources.engine.dispose()

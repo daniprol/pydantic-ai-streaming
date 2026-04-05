@@ -165,6 +165,10 @@ class AbsurdAgent(WrapperAgent[Any, Any]):
         return self._event_stream_handler or super().event_stream_handler
 
     @property
+    def on_complete(self) -> OnCompleteHandler[Any, Any] | None:
+        return self._on_complete
+
+    @property
     def toolsets(self) -> Sequence[AbstractToolset[Any]]:
         with self._absurd_overrides():
             return super().toolsets
