@@ -103,15 +103,16 @@ async def test_replay_flow_exposes_replay_endpoint(api_client, chat_request_fact
     create_response = await api_client.post('/api/v1/flows/dbos-replay/conversations')
     conversation_id = create_response.json()['conversation']['id']
 
-    await api_client.post(
+    response = await api_client.post(
         f'/api/v1/flows/dbos-replay/chat?conversation_id={conversation_id}',
         json=chat_request_factory('Stream this answer'),
     )
     replay = await api_client.get(
-        f'/api/v1/flows/dbos-replay/streams/{conversation_id}/replay',
+        f'/api/v1/flows/dbos-replay/streams/{response.headers["x-replay-id"]}/replay',
         timeout=2,
     )
 
+    assert response.status_code == 200
     assert replay.status_code == 200
     assert replay.headers['content-type'].startswith('text/event-stream')
 

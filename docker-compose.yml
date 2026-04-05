@@ -11,7 +11,8 @@ services:
       - ./apps/web:/workspace/apps/web
       - web-node-modules:/workspace/apps/web/node_modules
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   api:
     build:
@@ -21,6 +22,12 @@ services:
       - apps/api/.env
     ports:
       - '8000:8000'
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:8000/api/v1/health/live']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     volumes:
       - ./apps/api:/workspace/apps/api
       - api-venv:/workspace/apps/api/.venv
@@ -28,15 +35,22 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
 
   temporal-worker:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     command: ['uv', 'run', 'python', '-m', 'streaming_chat_api.temporal_worker']
+    healthcheck:
+      # test: ['CMD', 'uv', 'run', 'python', '-m', 'streaming_chat_api.temporal_worker_healthcheck']
+      test: ['CMD', 'pidof', 'python']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     env_file:
       - apps/api/.env
     volumes:
@@ -46,9 +60,9 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
 
   postgres:
     image: postgres:17
@@ -70,6 +84,11 @@ services:
     image: redis:7
     ports:
       - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   # Local dev: use auto-setup so Temporal creates its schema/default namespace for us.
   # Production: use temporalio/server and run schema setup/migrations + namespace creation separately.
@@ -83,6 +102,12 @@ services:
       POSTGRES_SEEDS: postgres
     ports:
       - '7233:7233'
+    healthcheck:
+      test: ['CMD', 'tctl', 'cluster', 'health']
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
     volumes:
       - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
     depends_on:
@@ -96,7 +121,8 @@ services:
     ports:
       - '8233:8080'
     depends_on:
-      - temporal
+      temporal:
+        condition: service_healthy
 
 volumes:
   postgres-data:

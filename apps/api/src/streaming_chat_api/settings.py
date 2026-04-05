@@ -9,6 +9,8 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine.url import make_url
 
+ThinkingLevel = Literal['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+
 
 API_DIR = Path(__file__).resolve().parents[2]
 API_ENV_FILE = API_DIR / '.env'
@@ -84,6 +86,7 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = Field(default='test-key')
     openai_api_version: str = '2024-10-21'
     azure_openai_model: str = 'gpt-5-mini'
+    thinking_level: ThinkingLevel = 'minimal'
     use_test_model: bool = False
 
     @property

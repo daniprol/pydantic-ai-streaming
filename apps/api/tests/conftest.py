@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID
 
 import fakeredis.aioredis
 import httpx
@@ -12,6 +13,7 @@ import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
+from pydantic_ai.tools import DeferredToolResults
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from streaming_chat_api.agents import AgentDependencies, build_support_agent
@@ -21,8 +23,67 @@ from streaming_chat_api.models import FlowType
 from streaming_chat_api.repository import ConversationRepository
 from streaming_chat_api.replay import ReplayStreamBroker
 from streaming_chat_api.resources import AppResources, ChatAgents
+from streaming_chat_api.services.common import (
+    build_adapter,
+    deserialize_model_messages,
+    persist_assistant_messages,
+)
 from streaming_chat_api.settings import API_ENV_FILE, Settings, get_settings
 from streaming_chat_api.support_client import FakeSupportClient
+
+
+class LocalTemporalClient:
+    def __init__(self, resources: AppResources):
+        self.resources = resources
+        self.started_workflows: list[dict[str, str]] = []
+
+    async def list_namespaces(self) -> None:
+        raise RuntimeError('Temporal server is not running in unit tests.')
+
+    async def start_workflow(self, workflow_run, workflow_input, *, id: str, task_queue: str):
+        self.started_workflows.append(
+            {
+                'id': id,
+                'task_queue': task_queue,
+                'workflow': getattr(workflow_run, '__qualname__', str(workflow_run)),
+            }
+        )
+
+        adapter = build_adapter(
+            workflow_input.request_body.encode('utf-8'),
+            workflow_input.accept,
+            self.resources.agents.basic,
+        )
+        deferred_tool_results = None
+        if workflow_input.deferred_tool_results is not None:
+            deferred_tool_results = DeferredToolResults(**workflow_input.deferred_tool_results)
+
+        async def on_complete(result):
+            async with self.resources.session_factory() as session:
+                repository = ConversationRepository(session)
+                conversation = await repository.get_conversation(
+                    UUID(workflow_input.conversation_id),
+                    FlowType.TEMPORAL,
+                )
+                assert conversation is not None
+                await persist_assistant_messages(
+                    session=session,
+                    repository=repository,
+                    conversation=conversation,
+                    result=result,
+                    clear_active_replay_id=True,
+                )
+
+        stream = adapter.run_stream(
+            message_history=deserialize_model_messages(workflow_input.message_history),
+            deferred_tool_results=deferred_tool_results,
+            deps=AgentDependencies(conversation_id=workflow_input.conversation_id),
+            on_complete=on_complete,
+        )
+        self.resources.replay_broker.start_stream(
+            workflow_input.replay_id,
+            adapter.encode_stream(stream),
+        )
 
 
 def build_settings(**overrides) -> Settings:
@@ -67,13 +128,13 @@ async def build_test_resources(settings: Settings) -> AsyncIterator[AppResources
         agents=ChatAgents(
             basic=support_agent,
             dbos=support_agent,
-            temporal=support_agent,
             dbos_replay=support_agent,
         ),
         replay_broker=ReplayStreamBroker(fake_redis, settings),
         started_at=datetime.now(timezone.utc),
         dbos_initialized=False,
     )
+    resources.temporal_client = LocalTemporalClient(resources)
 
     try:
         yield resources

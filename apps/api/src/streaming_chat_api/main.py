@@ -33,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=['*'],
         allow_headers=['*'],
-        expose_headers=['x-vercel-ai-ui-message-stream'],
+        expose_headers=['x-replay-id', 'x-vercel-ai-ui-message-stream'],
     )
 
     app.include_router(api_router, prefix=resolved_settings.api_v1_prefix)

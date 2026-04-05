@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,17 +17,20 @@ from streaming_chat_api.schemas import (
 )
 from streaming_chat_api.services.common import (
     append_user_message,
-    build_adapter,
-    build_agent_dependencies,
-    create_replay_id,
     build_create_response,
     build_list_response,
     build_messages_response,
-    build_replayable_streaming_response,
+    build_replay_stream_response,
+    create_replay_id,
     get_required_conversation,
     load_message_history,
     parse_chat_request,
-    persist_assistant_messages,
+    serialize_model_messages,
+)
+from streaming_chat_api.temporal_workflow import (
+    SupportWorkflow,
+    build_temporal_workflow_id,
+    build_temporal_workflow_input,
 )
 
 
@@ -92,31 +95,41 @@ async def stream_chat(
         await append_user_message(repository, conversation, parsed_request.new_message)
     await session.commit()
 
-    adapter = build_adapter(request_body, request.headers.get('accept'), resources.agents.temporal)
-    deps = build_agent_dependencies(resources, conversation)
-
-    async def on_complete(result):
-        await persist_assistant_messages(
-            session=session,
-            repository=repository,
-            conversation=conversation,
-            result=result,
-            clear_active_replay_id=True,
+    if resources.temporal_client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='Temporal client unavailable',
         )
 
-    stream = adapter.run_stream(
-        message_history=history,
-        deferred_tool_results=parsed_request.deferred_tool_results,
-        deps=deps,
-        on_complete=on_complete,
-    )
     replay_id = create_replay_id()
-    return await build_replayable_streaming_response(
-        session=session,
-        repository=repository,
-        conversation=conversation,
-        resources=resources,
-        adapter=adapter,
-        stream=stream,
+    workflow_input = build_temporal_workflow_input(
+        conversation_id=str(conversation.id),
         replay_id=replay_id,
+        request_body=request_body,
+        accept=request.headers.get('accept'),
+        message_history=serialize_model_messages(history),
+        deferred_tool_results=(
+            None
+            if parsed_request.deferred_tool_results is None
+            else {
+                'calls': parsed_request.deferred_tool_results.calls,
+                'approvals': parsed_request.deferred_tool_results.approvals,
+            }
+        ),
     )
+    await repository.set_active_replay_id(conversation, replay_id)
+    await session.commit()
+
+    try:
+        await resources.temporal_client.start_workflow(
+            SupportWorkflow.run,
+            workflow_input,
+            id=build_temporal_workflow_id(str(conversation.id), replay_id),
+            task_queue=resources.settings.temporal_task_queue,
+        )
+    except Exception:
+        await repository.set_active_replay_id(conversation, None)
+        await session.commit()
+        raise
+
+    return build_replay_stream_response(resources, replay_id)

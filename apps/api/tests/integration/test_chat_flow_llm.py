@@ -65,10 +65,11 @@ async def test_replayable_flow_streams_with_real_llm_and_supports_replay(
             'Reply with a short plain-text acknowledgement and do not call any tools.'
         ),
     ) as response:
+        replay_id = response.headers['x-replay-id']
         first_event_id = await read_first_sse_event_id(response)
 
     replay = await real_api_client.get(
-        f'/api/v1/flows/{flow}/streams/{conversation_id}/replay?last_event_id={first_event_id}',
+        f'/api/v1/flows/{flow}/streams/{replay_id}/replay?last_event_id={first_event_id}',
         timeout=10,
     )
     messages = await real_api_client.get(

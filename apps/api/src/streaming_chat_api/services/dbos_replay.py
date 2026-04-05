@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from streaming_chat_api.dbos_streaming import run_dbos_adapter_stream
 from streaming_chat_api.models import FlowType
 from streaming_chat_api.repository import ConversationRepository
 from streaming_chat_api.resources import AppResources
@@ -28,7 +29,6 @@ from streaming_chat_api.services.common import (
     load_message_history,
     parse_chat_request,
     persist_assistant_messages,
-    run_dbos_adapter_stream,
 )
 
 

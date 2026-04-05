@@ -8,6 +8,7 @@ import httpx
 import redis.asyncio as redis
 from dbos import DBOS
 from fastapi import FastAPI
+from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from temporalio.client import Client as TemporalClient
@@ -23,7 +24,6 @@ from streaming_chat_api.support_client import FakeSupportClient
 class ChatAgents:
     basic: object
     dbos: object
-    temporal: object
     dbos_replay: object
 
 
@@ -44,8 +44,7 @@ class AppResources:
 
 def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatAgents:
     from pydantic_ai.durable_exec.dbos import DBOSAgent
-    from pydantic_ai.durable_exec.temporal import TemporalAgent
-    from streaming_chat_api.services.common import stream_dbos_events
+    from streaming_chat_api.dbos_streaming import stream_dbos_events
 
     support_agent = build_support_agent(settings, support_client)
     return ChatAgents(
@@ -55,7 +54,6 @@ def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatA
             name='support-assistant-dbos',
             event_stream_handler=stream_dbos_events,
         ),
-        temporal=TemporalAgent(support_agent, name='support-assistant-temporal'),
         dbos_replay=DBOSAgent(
             support_agent,
             name='support-assistant-dbos-replay',
@@ -78,6 +76,7 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
         temporal_client = await TemporalClient.connect(
             resolved_settings.temporal_target_host,
             namespace=resolved_settings.temporal_namespace,
+            plugins=[PydanticAIPlugin()],
         )
     except Exception:
         temporal_client = None

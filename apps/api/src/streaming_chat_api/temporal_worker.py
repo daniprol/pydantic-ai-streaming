@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 
 from temporalio.api.workflowservice.v1.request_response_pb2 import DescribeNamespaceRequest
 from temporalio.client import Client
@@ -17,9 +18,18 @@ from tenacity import (
 
 from pydantic_ai.durable_exec.temporal import AgentPlugin, PydanticAIPlugin
 
-from streaming_chat_api.resources import build_agents
 from streaming_chat_api.settings import Settings, get_settings
-from streaming_chat_api.support_client import FakeSupportClient
+from streaming_chat_api.temporal_activities import (
+    clear_temporal_replay,
+    fail_temporal_replay_stream,
+    finish_temporal_replay_stream,
+    persist_temporal_run_output,
+)
+from streaming_chat_api.temporal_runtime import (
+    close_temporal_worker_runtime,
+    create_temporal_worker_runtime,
+    get_temporal_agent,
+)
 from streaming_chat_api.temporal_workflow import SupportWorkflow
 
 
@@ -50,7 +60,8 @@ async def validate_temporal_connection(client: Client, namespace: str) -> None:
     await client.workflow_service.describe_namespace(DescribeNamespaceRequest(namespace=namespace))
 
 
-async def connect_temporal_client(settings: Settings, temporal_agent: object) -> Client:
+async def connect_temporal_client(settings: Settings) -> Client:
+    temporal_agent = get_temporal_agent()
     plugins = [PydanticAIPlugin(), AgentPlugin(temporal_agent)]
 
     def log_retry(retry_state: RetryCallState) -> None:
@@ -84,9 +95,20 @@ async def connect_temporal_client(settings: Settings, temporal_agent: object) ->
     raise RuntimeError('Temporal client connection retry loop exited unexpectedly.')
 
 
+async def check_temporal_worker_health(settings: Settings | None = None) -> None:
+    resolved_settings = settings or get_settings()
+    # Build the agent/runtime-side config eagerly so import/config issues fail fast.
+    get_temporal_agent(resolved_settings)
+    client = await Client.connect(
+        resolved_settings.temporal_target_host,
+        namespace=resolved_settings.temporal_namespace,
+    )
+    await validate_temporal_connection(client, resolved_settings.temporal_namespace)
+
+
 async def main() -> None:
     settings = get_settings()
-    agents = build_agents(settings, FakeSupportClient())
+    runtime = await create_temporal_worker_runtime(settings)
 
     logger.info(
         'Starting Temporal worker for task queue %s in namespace %s.',
@@ -94,15 +116,23 @@ async def main() -> None:
         settings.temporal_namespace,
     )
 
-    client = await connect_temporal_client(settings, agents.temporal)
-    worker = Worker(
-        client,
-        task_queue=settings.temporal_task_queue,
-        workflows=[SupportWorkflow],
-    )
+    client = await connect_temporal_client(settings)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(close_temporal_worker_runtime, runtime)
+        worker = Worker(
+            client,
+            task_queue=settings.temporal_task_queue,
+            workflows=[SupportWorkflow],
+            activities=[
+                persist_temporal_run_output,
+                clear_temporal_replay,
+                finish_temporal_replay_stream,
+                fail_temporal_replay_stream,
+            ],
+        )
 
-    logger.info('Temporal worker connected to %s.', settings.temporal_target_host)
-    await worker.run()
+        logger.info('Temporal worker connected to %s.', settings.temporal_target_host)
+        await worker.run()
 
 
 if __name__ == '__main__':

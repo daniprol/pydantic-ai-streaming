@@ -4,14 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from dbos import DBOS
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from streaming_chat_api.settings import Settings
+from streaming_chat_api.settings import Settings, ThinkingLevel
 from streaming_chat_api.support_client import FakeSupportClient
 
 
@@ -27,7 +26,7 @@ def _load_prompt(filename: str) -> str:
     return (PROMPTS_DIR / filename).read_text(encoding='utf-8').strip()
 
 
-def build_model(settings: Settings):
+def build_model(settings: Settings) -> OpenAIChatModel | TestModel:
     if settings.use_test_model:
         return TestModel()
 
@@ -48,6 +47,7 @@ def build_research_agent(settings: Settings) -> Agent[None, str]:
         instructions=_load_prompt('research_system_prompt.txt'),
         output_type=str,
         name='support-researcher',
+        model_settings={'thinking': settings.thinking_level},
     )
 
 
@@ -58,17 +58,13 @@ def build_support_agent(
     support_client = support_client or FakeSupportClient()
     helper_agent = build_research_agent(settings)
 
-    @DBOS.step(name='support-assistant.policy-research')
-    async def run_policy_research(question: str) -> str:
-        result = await helper_agent.run(question)
-        return result.output
-
     agent = Agent(
         build_model(settings),
         instructions=_load_prompt('support_system_prompt.txt'),
         deps_type=AgentDependencies,
         output_type=str,
         name='support-assistant',
+        model_settings={'thinking': settings.thinking_level},
     )
 
     @agent.tool
@@ -91,6 +87,7 @@ def build_support_agent(
 
     @agent.tool
     async def ask_policy_researcher(_: RunContext[AgentDependencies], question: str) -> str:
-        return await run_policy_research(question)
+        result = await helper_agent.run(question)
+        return result.output
 
     return agent

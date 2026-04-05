@@ -109,7 +109,7 @@ async def test_dbos_replay_flow_streams_and_replays_with_run_only_agent(
         json=chat_request_factory('Replay this answer'),
     )
     replay = await api_client.get(
-        f'/api/v1/flows/dbos-replay/streams/{conversation_id}/replay',
+        f'/api/v1/flows/dbos-replay/streams/{response.headers["x-replay-id"]}/replay',
         timeout=2,
     )
 

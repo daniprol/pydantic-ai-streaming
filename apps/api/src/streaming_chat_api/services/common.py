@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-from contextvars import ContextVar
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from json import JSONDecodeError
-from contextlib import suppress
 from typing import Any
 from uuid import UUID
 from uuid import uuid4
@@ -16,17 +13,11 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.messages import (
-    AgentStreamEvent,
     ModelMessage,
     ModelMessagesTypeAdapter,
     ModelRequest,
-    PartDeltaEvent,
-    PartEndEvent,
-    PartStartEvent,
 )
-from pydantic_ai.messages import TextPart, TextPartDelta
-from pydantic_ai.run import AgentRunResultEvent
-from pydantic_ai.tools import DeferredToolResults
+from pydantic_ai.tools import DeferredToolResults, RunContext
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
 from fastapi.responses import StreamingResponse
@@ -53,16 +44,7 @@ class ParsedChatRequest:
     new_message: UIMessage | None
 
 
-@dataclass(slots=True)
-class _StreamFailure:
-    error: Exception
-
-
-_STREAM_COMPLETE = object()
 REPLAY_ID_HEADER = 'x-replay-id'
-_dbos_stream_queue: ContextVar[
-    asyncio.Queue[AgentStreamEvent | AgentRunResultEvent[str] | _StreamFailure | object] | None
-] = ContextVar('dbos_stream_queue', default=None)
 
 
 def serialize_model_messages(messages: Sequence[ModelMessage]) -> list[dict[str, Any]]:
@@ -206,15 +188,14 @@ async def append_user_message(
     )
 
 
-async def persist_assistant_messages(
+async def persist_assistant_model_messages(
     *,
     session: AsyncSession,
     repository: ConversationRepository,
     conversation: Conversation,
-    result: AgentRunResult[str],
+    new_messages: Sequence[ModelMessage],
     clear_active_replay_id: bool = False,
 ) -> None:
-    new_messages = result.new_messages()
     assistant_messages = list(new_messages)
     if assistant_messages and isinstance(assistant_messages[0], ModelRequest):
         assistant_messages = assistant_messages[1:]
@@ -245,6 +226,23 @@ async def persist_assistant_messages(
     await session.commit()
 
 
+async def persist_assistant_messages(
+    *,
+    session: AsyncSession,
+    repository: ConversationRepository,
+    conversation: Conversation,
+    result: AgentRunResult[str],
+    clear_active_replay_id: bool = False,
+) -> None:
+    await persist_assistant_model_messages(
+        session=session,
+        repository=repository,
+        conversation=conversation,
+        new_messages=result.new_messages(),
+        clear_active_replay_id=clear_active_replay_id,
+    )
+
+
 def build_agent_dependencies(
     resources: AppResources,
     conversation: Conversation,
@@ -270,6 +268,19 @@ def create_replay_id() -> str:
     return str(uuid4())
 
 
+def build_temporal_run_metadata(
+    *,
+    replay_id: str,
+    request_body: bytes,
+    accept: str | None,
+) -> dict[str, str | None]:
+    return {
+        'replay_id': replay_id,
+        'request_body': request_body.decode('utf-8'),
+        'accept': accept,
+    }
+
+
 async def build_replayable_streaming_response(
     *,
     session: AsyncSession,
@@ -284,92 +295,31 @@ async def build_replayable_streaming_response(
     await session.commit()
 
     resources.replay_broker.start_stream(replay_id, adapter.encode_stream(stream))
+    return build_replay_stream_response(resources, replay_id)
+
+
+def build_replay_stream_response(
+    resources: AppResources,
+    replay_id: str,
+) -> StreamingResponse:
     return replay_stream_response(
         resources.replay_broker.replay_stream(replay_id, None),
         headers={REPLAY_ID_HEADER: replay_id},
     )
 
 
-async def stream_dbos_events(_: Any, event_stream: Any) -> None:
-    queue = _dbos_stream_queue.get()
-    if queue is None:  # pragma: no cover - indicates incorrect bridge setup
-        raise RuntimeError('DBOS event stream queue is not configured.')
+def get_required_temporal_metadata(
+    ctx: RunContext[AgentDependencies],
+) -> tuple[str, str, str | None]:
+    metadata = ctx.metadata
+    if not isinstance(metadata, dict):  # pragma: no cover - defensive validation
+        raise RuntimeError('Temporal run metadata is missing.')
 
-    async for event in event_stream:
-        await queue.put(event)
-
-
-def _has_text_content(event: AgentStreamEvent) -> bool:
-    if isinstance(event, PartStartEvent | PartEndEvent):
-        return isinstance(event.part, TextPart) and bool(event.part.content)
-    if isinstance(event, PartDeltaEvent):
-        return isinstance(event.delta, TextPartDelta) and bool(event.delta.content_delta)
-    return False
-
-
-def run_dbos_adapter_stream(
-    *,
-    adapter: VercelAIAdapter,
-    message_history: Sequence[ModelMessage] | None,
-    deferred_tool_results: DeferredToolResults | None,
-    deps: AgentDependencies,
-    on_complete: Any = None,
-):
-    # DBOS exposes streaming via an event-stream handler callback, while the Vercel
-    # adapter expects an async iterator. The queue bridges those two interfaces and
-    # keeps a little buffering/backpressure between the workflow and the HTTP stream.
-    queue: asyncio.Queue[AgentStreamEvent | AgentRunResultEvent[str] | _StreamFailure | object] = (
-        asyncio.Queue(maxsize=128)
-    )
-    all_messages = [*(message_history or []), *adapter.messages]
-
-    async def run_agent() -> None:
-        token = _dbos_stream_queue.set(queue)
-        try:
-            result = await adapter.agent.run(
-                message_history=all_messages,
-                deferred_tool_results=deferred_tool_results,
-                deps=deps,
-                event_stream_handler=stream_dbos_events,
-            )
-            await queue.put(AgentRunResultEvent(result))
-        except Exception as exc:
-            await queue.put(_StreamFailure(exc))
-        finally:
-            _dbos_stream_queue.reset(token)
-            await queue.put(_STREAM_COMPLETE)
-
-    async def native_stream():
-        task = asyncio.create_task(run_agent())
-        saw_text_content = False
-        try:
-            # Drain events until the workflow finishes, then hand the native event
-            # stream back to the Vercel adapter for protocol-specific encoding.
-            while True:
-                item = await queue.get()
-                if item is _STREAM_COMPLETE:
-                    break
-                if isinstance(item, _StreamFailure):
-                    raise item.error
-                if isinstance(item, AgentRunResultEvent):
-                    if (
-                        not saw_text_content
-                        and isinstance(item.result.output, str)
-                        and item.result.output
-                    ):
-                        text_part = TextPart(content=item.result.output)
-                        yield PartStartEvent(index=0, part=text_part)
-                        yield PartEndEvent(index=0, part=text_part)
-                        saw_text_content = True
-                    yield item
-                    continue
-                saw_text_content = saw_text_content or _has_text_content(item)
-                yield item
-            await task
-        finally:
-            if not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-
-    return adapter.transform_stream(native_stream(), on_complete=on_complete)
+    replay_id = metadata.get('replay_id')
+    request_body = metadata.get('request_body')
+    accept = metadata.get('accept')
+    if not isinstance(replay_id, str) or not isinstance(request_body, str):
+        raise RuntimeError('Temporal run metadata is incomplete.')
+    if accept is not None and not isinstance(accept, str):
+        raise RuntimeError('Temporal Accept header must be a string when provided.')
+    return replay_id, request_body, accept

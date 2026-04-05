@@ -123,10 +123,11 @@ async def test_replayable_flow_continues_after_client_disconnect(
         json=chat_request_factory(f'Replay this {flow} answer'),
     ) as response:
         assert response.status_code == 200
+        replay_id = response.headers['x-replay-id']
         first_id = await read_first_sse_event_id(response)
 
     replay = await api_client.get(
-        f'/api/v1/flows/{flow}/streams/{conversation_id}/replay?last_event_id={first_id}',
+        f'/api/v1/flows/{flow}/streams/{replay_id}/replay?last_event_id={first_id}',
         timeout=5,
     )
     messages = await api_client.get(
@@ -172,7 +173,7 @@ async def test_dbos_replay_flow_exposes_replay_header(api_client, chat_request_f
     )
 
     assert response.status_code == 200
-    assert response.headers['x-replay-id'] == conversation_id
+    assert response.headers['x-replay-id']
     assert first_stream_event_id(response.text)
 
 
@@ -193,7 +194,7 @@ async def test_temporal_flow_exposes_replay_header_and_clears_active_replay_id(
     )
 
     assert response.status_code == 200
-    assert response.headers['x-replay-id'] == conversation_id
+    assert response.headers['x-replay-id']
     assert first_stream_event_id(response.text)
     assert messages.status_code == 200
     assert messages.json()['active_replay_id'] is None
