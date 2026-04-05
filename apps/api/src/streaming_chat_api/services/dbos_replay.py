@@ -3,8 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import Request
-from fastapi.responses import Response, StreamingResponse
-from pydantic_ai.ui.vercel_ai._event_stream import VERCEL_AI_DSP_HEADERS
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from streaming_chat_api.models import FlowType
@@ -20,9 +19,11 @@ from streaming_chat_api.services.common import (
     append_user_message,
     build_adapter,
     build_agent_dependencies,
+    create_replay_id,
     build_create_response,
     build_list_response,
     build_messages_response,
+    build_replayable_streaming_response,
     get_required_conversation,
     load_message_history,
     parse_chat_request,
@@ -90,7 +91,6 @@ async def stream_chat(
 
     if parsed_request.new_message is not None:
         await append_user_message(repository, conversation, parsed_request.new_message)
-    await repository.set_active_replay_id(conversation, str(conversation.id))
     await session.commit()
 
     adapter = build_adapter(
@@ -114,9 +114,13 @@ async def stream_chat(
         deps=deps,
         on_complete=on_complete,
     )
-    encoded_stream = adapter.encode_stream(stream)
-    return StreamingResponse(
-        resources.replay_broker.live_stream(str(conversation.id), encoded_stream),
-        media_type='text/event-stream',
-        headers=dict(VERCEL_AI_DSP_HEADERS),
+    replay_id = create_replay_id()
+    return await build_replayable_streaming_response(
+        session=session,
+        repository=repository,
+        conversation=conversation,
+        resources=resources,
+        adapter=adapter,
+        stream=stream,
+        replay_id=replay_id,
     )

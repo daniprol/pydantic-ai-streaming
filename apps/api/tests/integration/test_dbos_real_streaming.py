@@ -29,10 +29,23 @@ async def real_dbos_resources(postgres_dsn: str) -> AppResources:
         redis_url='redis://unused',
         use_test_model=True,
     )
-    resources = await create_resources(settings)
-    async with resources.engine.begin() as connection:
-        await connection.run_sync(Base.metadata.drop_all)
-        await connection.run_sync(Base.metadata.create_all)
+    resources: AppResources | None = None
+    for attempt in range(1, 11):
+        try:
+            resources = await create_resources(settings)
+            async with resources.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.drop_all)
+                await connection.run_sync(Base.metadata.create_all)
+            break
+        except Exception:
+            if resources is not None:
+                await close_resources(resources)
+                resources = None
+            if attempt == 10:
+                raise
+            await asyncio.sleep(1)
+
+    assert resources is not None
 
     try:
         yield resources

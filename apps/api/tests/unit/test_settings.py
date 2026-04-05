@@ -97,6 +97,21 @@ def test_settings_normalize_local_temporal_host_for_local_execution() -> None:
     assert settings.temporal_target_host == '127.0.0.1:7233'
 
 
+def test_settings_require_temporal_target_host_port() -> None:
+    with pytest.raises(ValidationError, match='temporal_target_host'):
+        build_settings(temporal_target_host='localhost')
+
+
+def test_settings_require_non_empty_temporal_namespace() -> None:
+    with pytest.raises(ValidationError, match='temporal_namespace'):
+        build_settings(temporal_namespace='   ')
+
+
+def test_settings_require_positive_temporal_connect_attempts() -> None:
+    with pytest.raises(ValidationError, match='temporal_connect_attempts'):
+        build_settings(temporal_connect_attempts=0)
+
+
 def test_settings_keep_container_hosts_when_running_in_docker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

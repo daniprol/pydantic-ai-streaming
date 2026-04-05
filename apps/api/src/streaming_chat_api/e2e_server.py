@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import gettempdir
+from uuid import uuid4
 
 import fakeredis.aioredis
-import httpx
 import uvicorn
 from fastapi import FastAPI
 
@@ -19,8 +19,13 @@ from streaming_chat_api.settings import Settings
 from streaming_chat_api.support_client import FakeSupportClient
 
 
+class _NoopAsyncClient:
+    async def aclose(self) -> None:
+        return None
+
+
 def build_e2e_settings() -> Settings:
-    database_path = Path(gettempdir()) / 'streaming-chat-e2e.sqlite3'
+    database_path = Path(gettempdir()) / f'streaming-chat-e2e-{uuid4()}.sqlite3'
     if database_path.exists():
         database_path.unlink()
 
@@ -45,7 +50,7 @@ def build_e2e_app() -> FastAPI:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
 
-        http_client = httpx.AsyncClient()
+        http_client = _NoopAsyncClient()
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
         support_client = FakeSupportClient()
         support_agent = build_support_agent(settings, support_client)

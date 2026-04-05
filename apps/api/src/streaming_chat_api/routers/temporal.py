@@ -4,13 +4,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from streaming_chat_api.dependencies import PaginationDep, ResourcesDep, SessionDep
+from streaming_chat_api.dependencies import LastEventIdDep, PaginationDep, ResourcesDep, SessionDep
 from streaming_chat_api.schemas import (
     ConversationCreateResponse,
     ConversationListResponse,
     ConversationMessagesResponse,
 )
 from streaming_chat_api.services import temporal as temporal_service
+from streaming_chat_api.ui import replay_stream_response
 
 
 router = APIRouter(prefix='/flows/temporal', tags=['temporal'])
@@ -59,3 +60,12 @@ async def chat(
         resources=resources,
         conversation_id=conversation_id,
     )
+
+
+@router.get('/streams/{replay_id}/replay')
+async def replay_stream(
+    replay_id: str,
+    resources: ResourcesDep,
+    last_event_id: LastEventIdDep,
+):
+    return replay_stream_response(resources.replay_broker.replay_stream(replay_id, last_event_id))

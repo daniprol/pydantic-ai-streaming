@@ -16,6 +16,7 @@ from rich.text import Text
 
 
 FlowType = Literal['basic', 'dbos', 'temporal', 'dbos-replay']
+REPLAYABLE_FLOWS = {'temporal', 'dbos-replay'}
 ROLE_STYLES = {
     'user': 'bold cyan',
     'assistant': 'bold green',
@@ -36,6 +37,26 @@ class ConversationState:
     id: str
     flow: FlowType
     messages: list[dict[str, Any]]
+    active_replay_id: str | None = None
+
+
+@dataclass(slots=True)
+class ConversationSnapshot:
+    messages: list[dict[str, Any]]
+    active_replay_id: str | None
+
+
+@dataclass(slots=True)
+class SSEFrame:
+    event_id: str | None
+    payload: dict[str, Any]
+
+
+@dataclass(slots=True)
+class StreamOptions:
+    resume_stream: bool = False
+    debug_stream: bool = False
+    drop_after_events: int | None = None
 
 
 class ChatBackend(Protocol):
@@ -43,14 +64,56 @@ class ChatBackend(Protocol):
 
     def create_conversation(self, flow: FlowType) -> str: ...
 
-    def load_messages(self, flow: FlowType, conversation_id: str) -> list[dict[str, Any]]: ...
+    def load_conversation(self, flow: FlowType, conversation_id: str) -> ConversationSnapshot: ...
 
-    def stream_chat(
+    def open_chat_stream(
         self,
         flow: FlowType,
         conversation_id: str,
         messages: Sequence[dict[str, Any]],
-    ) -> Iterator[dict[str, Any]]: ...
+    ) -> 'HttpSSEStream': ...
+
+    def open_replay_stream(
+        self,
+        flow: FlowType,
+        replay_id: str,
+        last_event_id: str | None,
+    ) -> 'HttpSSEStream': ...
+
+
+class HttpSSEStream(Iterator[SSEFrame]):
+    def __init__(self, stream_context: Any):
+        self._stream_context = stream_context
+        self._response = self._stream_context.__enter__()
+        self._closed = False
+        try:
+            self._response.raise_for_status()
+        except Exception:
+            self.close()
+            raise
+        self.replay_id = self._response.headers.get('x-replay-id')
+        self._frames = _iter_sse_frames(self._response.iter_lines())
+
+    def __iter__(self) -> 'HttpSSEStream':
+        return self
+
+    def __next__(self) -> SSEFrame:
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._frames)
+        except StopIteration:
+            self.close()
+            raise
+        except Exception:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._stream_context.__exit__(None, None, None)
 
 
 class HttpChatBackend:
@@ -82,38 +145,71 @@ class HttpChatBackend:
         response.raise_for_status()
         return cast(str, response.json()['conversation']['id'])
 
-    def load_messages(self, flow: FlowType, conversation_id: str) -> list[dict[str, Any]]:
+    def load_conversation(self, flow: FlowType, conversation_id: str) -> ConversationSnapshot:
         response = self.client.get(f'/api/v1/flows/{flow}/conversations/{conversation_id}/messages')
         response.raise_for_status()
         payload = response.json()
-        return cast(list[dict[str, Any]], payload['messages'])
+        return ConversationSnapshot(
+            messages=cast(list[dict[str, Any]], payload['messages']),
+            active_replay_id=cast(str | None, payload.get('active_replay_id')),
+        )
 
-    def stream_chat(
+    def open_chat_stream(
         self,
         flow: FlowType,
         conversation_id: str,
         messages: Sequence[dict[str, Any]],
-    ) -> Iterator[dict[str, Any]]:
+    ) -> HttpSSEStream:
         request_body = {
             'trigger': 'submit-message',
             'id': f'cli-{conversation_id}',
             'messages': list(messages[-1:]),
         }
-        with self.client.stream(
+        return self._open_stream(
             'POST',
             f'/api/v1/flows/{flow}/chat',
             params={'conversation_id': conversation_id},
             json=request_body,
             headers={'Accept': 'text/event-stream'},
-        ) as response:
-            response.raise_for_status()
-            for event in _iter_sse_events(response.iter_lines()):
-                yield event
+        )
+
+    def open_replay_stream(
+        self,
+        flow: FlowType,
+        replay_id: str,
+        last_event_id: str | None,
+    ) -> HttpSSEStream:
+        params: dict[str, str] = {}
+        if last_event_id is not None:
+            params['last_event_id'] = last_event_id
+        return self._open_stream(
+            'GET',
+            f'/api/v1/flows/{flow}/streams/{replay_id}/replay',
+            params=params or None,
+            headers={'Accept': 'text/event-stream'},
+        )
+
+    def _open_stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> HttpSSEStream:
+        return HttpSSEStream(
+            self.client.stream(method, path, params=params, json=json, headers=headers)
+        )
 
 
 def format_http_error(error: httpx.HTTPStatusError) -> str:
     response = error.response
-    message = response.text.strip()
+    try:
+        message = response.text.strip()
+    except httpx.ResponseNotRead:
+        response.read()
+        message = response.text.strip()
     try:
         payload = response.json()
         if isinstance(payload, dict) and isinstance(payload.get('detail'), str):
@@ -136,8 +232,9 @@ def print_api_error(console: Console, error: Exception) -> None:
     console.print(Text(message, style='bold red'))
 
 
-def _iter_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
+def _iter_sse_frames(lines: Iterable[str]) -> Iterator[SSEFrame]:
     data_lines: list[str] = []
+    event_id: str | None = None
     for line in lines:
         if not line:
             if data_lines:
@@ -145,7 +242,11 @@ def _iter_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
                 data_lines.clear()
                 if payload == '[DONE]':
                     return
-                yield cast(dict[str, Any], json.loads(payload))
+                yield SSEFrame(event_id=event_id, payload=cast(dict[str, Any], json.loads(payload)))
+                event_id = None
+            continue
+        if line.startswith('id: '):
+            event_id = line[4:]
             continue
         if line.startswith('data: '):
             data_lines.append(line[6:])
@@ -153,7 +254,12 @@ def _iter_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
     if data_lines:
         payload = ''.join(data_lines)
         if payload != '[DONE]':
-            yield cast(dict[str, Any], json.loads(payload))
+            yield SSEFrame(event_id=event_id, payload=cast(dict[str, Any], json.loads(payload)))
+
+
+def _iter_sse_events(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
+    for frame in _iter_sse_frames(lines):
+        yield frame.payload
 
 
 def build_message(text: str) -> dict[str, Any]:
@@ -217,6 +323,84 @@ def print_message(console: Console, message: dict[str, Any]) -> None:
             label_style=ROLE_STYLES.get(role, 'bold white'),
             text_style='white',
         )
+
+
+def flow_supports_stream_resume(flow: FlowType) -> bool:
+    return flow in REPLAYABLE_FLOWS
+
+
+def print_stream_debug(console: Console, message: str, value: str | None = None) -> None:
+    line = Text('[stream]', style='bold magenta')
+    line.append(f' {message}', style='bright_black')
+    if value is not None:
+        line.append(' ', style='bright_black')
+        line.append(value, style='bold cyan')
+    console.print(line)
+
+
+class _SimulatedDisconnect(Exception):
+    pass
+
+
+def stream_chat_events(
+    backend: ChatBackend,
+    console: Console,
+    state: ConversationState,
+    user_message: dict[str, Any],
+    stream_options: StreamOptions,
+) -> Iterator[dict[str, Any]]:
+    replay_enabled = stream_options.resume_stream and flow_supports_stream_resume(state.flow)
+    if stream_options.drop_after_events is not None and not replay_enabled:
+        raise RuntimeError(
+            'Simulated disconnects require stream replay on temporal or dbos-replay.'
+        )
+
+    resume_attempts = 0
+    events_seen = 0
+    disconnect_simulated = False
+    last_event_id: str | None = None
+    stream = backend.open_chat_stream(state.flow, state.id, [user_message])
+    replay_id = stream.replay_id
+
+    if stream_options.debug_stream and replay_enabled:
+        print_stream_debug(console, 'replay enabled for', state.flow)
+        if replay_id is not None:
+            print_stream_debug(console, 'replay_id=', replay_id)
+
+    while True:
+        try:
+            for frame in stream:
+                if frame.event_id is not None:
+                    last_event_id = frame.event_id
+                yield frame.payload
+                events_seen += 1
+                if (
+                    stream_options.drop_after_events is not None
+                    and not disconnect_simulated
+                    and events_seen >= stream_options.drop_after_events
+                ):
+                    disconnect_simulated = True
+                    if stream_options.debug_stream:
+                        print_stream_debug(
+                            console,
+                            'simulating disconnect after events=',
+                            str(events_seen),
+                        )
+                    stream.close()
+                    raise _SimulatedDisconnect()
+            return
+        except (_SimulatedDisconnect, httpx.RequestError):
+            stream.close()
+            if not replay_enabled or replay_id is None:
+                raise RuntimeError('Stream replay is unavailable for this response.')
+            if resume_attempts >= 3:
+                raise
+
+            resume_attempts += 1
+            if stream_options.debug_stream:
+                checkpoint = last_event_id or 'stream-start'
+                print_stream_debug(console, 'resuming from last_event_id=', checkpoint)
+            stream = backend.open_replay_stream(state.flow, replay_id, last_event_id)
 
 
 class StreamPrinter:
@@ -319,9 +503,14 @@ def choose_conversation(
         console.print(Text(f'Created conversation: {resolved_conversation_id}', style='bold green'))
         return ConversationState(id=resolved_conversation_id, flow=flow, messages=[])
 
-    messages = backend.load_messages(flow, resolved_conversation_id)
+    snapshot = backend.load_conversation(flow, resolved_conversation_id)
     console.print(Text(f'Resumed conversation: {resolved_conversation_id}', style='bold blue'))
-    return ConversationState(id=resolved_conversation_id, flow=flow, messages=messages)
+    return ConversationState(
+        id=resolved_conversation_id,
+        flow=flow,
+        messages=snapshot.messages,
+        active_replay_id=snapshot.active_replay_id,
+    )
 
 
 def print_conversations_table(
@@ -342,30 +531,54 @@ def print_conversations_table(
     console.print(table)
 
 
-def build_resume_command(base_url: str, state: ConversationState) -> str:
+def build_resume_command(
+    base_url: str,
+    state: ConversationState,
+    *,
+    resume_stream: bool = False,
+) -> str:
     command = [
         'uv run --project apps/api chat',
         f'--mode {state.flow}',
         f'--conversation-id {state.id}',
     ]
+    if resume_stream:
+        command.append('--resume-stream')
     if base_url.rstrip('/') != 'http://127.0.0.1:8000':
         command.append(f'--base-url {base_url}')
     return ' '.join(command)
 
 
-def print_resume_hint(console: Console, base_url: str, state: ConversationState | None) -> None:
+def print_resume_hint(
+    console: Console,
+    base_url: str,
+    state: ConversationState | None,
+    *,
+    resume_stream: bool = False,
+) -> None:
     console.print()
     if state is None:
         console.print(Text('Interrupted.', style='bold yellow'))
         return
 
     console.print(Text('Interrupted. Resume with:', style='bold yellow'))
-    console.print(Text(build_resume_command(base_url, state), style='bold cyan'))
+    console.print(
+        Text(build_resume_command(base_url, state, resume_stream=resume_stream), style='bold cyan')
+    )
 
 
-def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationState) -> None:
+def run_chat_loop(
+    backend: ChatBackend,
+    console: Console,
+    state: ConversationState,
+    stream_options: StreamOptions,
+) -> None:
     print_history(console, state)
     console.print(Text('Commands: /exit, /history, /new', style='dim'))
+    if stream_options.resume_stream and not flow_supports_stream_resume(state.flow):
+        console.print(
+            Text('Stream resume is only supported for temporal and dbos-replay.', style='yellow')
+        )
 
     while True:
         prompt = Prompt.ask('[bold cyan]You[/bold cyan]').strip()
@@ -375,10 +588,12 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
             return
         if prompt == '/history':
             try:
-                state.messages = backend.load_messages(state.flow, state.id)
+                snapshot = backend.load_conversation(state.flow, state.id)
             except httpx.HTTPError as error:
                 print_api_error(console, error)
                 continue
+            state.messages = snapshot.messages
+            state.active_replay_id = snapshot.active_replay_id
             print_history(console, state)
             continue
         if prompt == '/new':
@@ -388,6 +603,7 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
                 print_api_error(console, error)
                 continue
             state.messages = []
+            state.active_replay_id = None
             console.print(Text(f'Created conversation: {state.id}', style='bold green'))
             continue
 
@@ -395,12 +611,17 @@ def run_chat_loop(backend: ChatBackend, console: Console, state: ConversationSta
 
         printer = StreamPrinter(console)
         try:
-            for event in backend.stream_chat(state.flow, state.id, [user_message]):
+            for event in stream_chat_events(backend, console, state, user_message, stream_options):
                 printer.handle_event(event)
-            state.messages = backend.load_messages(state.flow, state.id)
+            snapshot = backend.load_conversation(state.flow, state.id)
+            state.messages = snapshot.messages
+            state.active_replay_id = snapshot.active_replay_id
         except httpx.HTTPError as error:
             printer._end_open_block()
             print_api_error(console, error)
+        except RuntimeError as error:
+            printer._end_open_block()
+            console.print(Text(str(error), style='bold red'))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -428,16 +649,40 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='List existing conversations for the selected mode and exit.',
     )
+    parser.add_argument(
+        '--resume-stream',
+        action='store_true',
+        help='Automatically resume interrupted streams when the flow supports replay.',
+    )
+    parser.add_argument(
+        '--debug-stream',
+        action='store_true',
+        help='Show debug output for stream replay checkpoints and reconnects.',
+    )
+    parser.add_argument(
+        '--drop-after-events',
+        type=int,
+        help='Developer testing: simulate a disconnect after N streamed events.',
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.drop_after_events is not None and not args.resume_stream:
+        raise SystemExit('--drop-after-events requires --resume-stream')
     console = Console(highlight=False)
     backend = HttpChatBackend(args.base_url)
     state: ConversationState | None = None
+    stream_options = StreamOptions(
+        resume_stream=args.resume_stream,
+        debug_stream=args.debug_stream,
+        drop_after_events=args.drop_after_events,
+    )
     try:
         flow = cast(FlowType, args.mode)
+        if args.drop_after_events is not None and not flow_supports_stream_resume(flow):
+            raise SystemExit('--drop-after-events is only supported for temporal and dbos-replay')
         if args.list:
             print_conversations_table(console, backend.list_conversations(flow))
             return
@@ -449,9 +694,9 @@ def main() -> None:
             conversation_id=args.conversation_id,
             latest=args.latest,
         )
-        run_chat_loop(backend, console, state)
+        run_chat_loop(backend, console, state, stream_options)
     except KeyboardInterrupt:
-        print_resume_hint(console, args.base_url, state)
+        print_resume_hint(console, args.base_url, state, resume_stream=args.resume_stream)
     except httpx.HTTPError as error:
         print_api_error(console, error)
     finally:

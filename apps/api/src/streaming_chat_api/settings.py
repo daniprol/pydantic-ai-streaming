@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     temporal_target_host: str = 'localhost:7233'
     temporal_namespace: str = 'default'
     temporal_task_queue: str = 'streaming-chat'
+    temporal_connect_attempts: int = Field(default=10, ge=1)
 
     dbos_system_database_url: str = 'postgresql://postgres:postgres@localhost:5432/streaming_chat'
 
@@ -130,7 +131,32 @@ class Settings(BaseSettings):
     def normalize_temporal_host(cls, value: str) -> str:
         return normalize_local_service_target(value)
 
+    @field_validator('temporal_target_host', mode='after')
+    @classmethod
+    def validate_temporal_target_host(cls, value: str) -> str:
+        host, separator, port = value.rpartition(':')
+        if not separator or not host or not port:
+            raise ValueError('temporal_target_host must be in host:port format')
+        if not port.isdigit():
+            raise ValueError('temporal_target_host port must be numeric')
+
+        port_number = int(port)
+        if port_number < 1 or port_number > 65535:
+            raise ValueError('temporal_target_host port must be between 1 and 65535')
+
+        return value
+
+    @field_validator('temporal_namespace', 'temporal_task_queue', mode='after')
+    @classmethod
+    def validate_required_temporal_strings(cls, value: str) -> str:
+        if not value:
+            raise ValueError('value must not be empty')
+        return value
+
     @field_validator(
+        'temporal_target_host',
+        'temporal_namespace',
+        'temporal_task_queue',
         'azure_openai_endpoint',
         'azure_openai_api_key',
         'openai_api_version',

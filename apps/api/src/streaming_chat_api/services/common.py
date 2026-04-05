@@ -9,6 +9,7 @@ from json import JSONDecodeError
 from contextlib import suppress
 from typing import Any
 from uuid import UUID
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +29,7 @@ from pydantic_ai.run import AgentRunResultEvent
 from pydantic_ai.tools import DeferredToolResults
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import UIMessage
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from streaming_chat_api.agents import AgentDependencies
@@ -42,6 +44,7 @@ from streaming_chat_api.schemas import (
     ConversationSummary,
     OffsetPaginationParams,
 )
+from streaming_chat_api.ui import replay_stream_response
 
 
 @dataclass(slots=True)
@@ -56,6 +59,7 @@ class _StreamFailure:
 
 
 _STREAM_COMPLETE = object()
+REPLAY_ID_HEADER = 'x-replay-id'
 _dbos_stream_queue: ContextVar[
     asyncio.Queue[AgentStreamEvent | AgentRunResultEvent[str] | _StreamFailure | object] | None
 ] = ContextVar('dbos_stream_queue', default=None)
@@ -260,6 +264,30 @@ def build_adapter(request_body: bytes, accept: str | None, agent: Any) -> Vercel
         )
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
+
+
+def create_replay_id() -> str:
+    return str(uuid4())
+
+
+async def build_replayable_streaming_response(
+    *,
+    session: AsyncSession,
+    repository: ConversationRepository,
+    conversation: Conversation,
+    resources: AppResources,
+    adapter: VercelAIAdapter,
+    stream: Any,
+    replay_id: str,
+) -> StreamingResponse:
+    await repository.set_active_replay_id(conversation, replay_id)
+    await session.commit()
+
+    resources.replay_broker.start_stream(replay_id, adapter.encode_stream(stream))
+    return replay_stream_response(
+        resources.replay_broker.replay_stream(replay_id, None),
+        headers={REPLAY_ID_HEADER: replay_id},
+    )
 
 
 async def stream_dbos_events(_: Any, event_stream: Any) -> None:

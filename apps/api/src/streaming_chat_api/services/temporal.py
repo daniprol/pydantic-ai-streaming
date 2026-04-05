@@ -19,9 +19,11 @@ from streaming_chat_api.services.common import (
     append_user_message,
     build_adapter,
     build_agent_dependencies,
+    create_replay_id,
     build_create_response,
     build_list_response,
     build_messages_response,
+    build_replayable_streaming_response,
     get_required_conversation,
     load_message_history,
     parse_chat_request,
@@ -99,6 +101,7 @@ async def stream_chat(
             repository=repository,
             conversation=conversation,
             result=result,
+            clear_active_replay_id=True,
         )
 
     stream = adapter.run_stream(
@@ -107,4 +110,13 @@ async def stream_chat(
         deps=deps,
         on_complete=on_complete,
     )
-    return adapter.streaming_response(stream)
+    replay_id = create_replay_id()
+    return await build_replayable_streaming_response(
+        session=session,
+        repository=repository,
+        conversation=conversation,
+        resources=resources,
+        adapter=adapter,
+        stream=stream,
+        replay_id=replay_id,
+    )
