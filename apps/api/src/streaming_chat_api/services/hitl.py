@@ -115,7 +115,11 @@ def raise_pending_conflict(unresolved_pending_tool_calls: Sequence[PendingToolCa
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
-            'message': 'Resolve pending tool calls before sending a new message.',
+            'message': 'Resolve pending tool calls before sending another message.',
+            'pendingToolCallIds': [
+                pending_tool_call.tool_call_id
+                for pending_tool_call in unresolved_pending_tool_calls
+            ],
             'pending_tool_calls': [
                 pending_tool_call_to_response(pending_tool_call).model_dump(mode='json')
                 for pending_tool_call in unresolved_pending_tool_calls

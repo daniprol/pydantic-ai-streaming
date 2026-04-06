@@ -31,6 +31,19 @@ export interface HitlApprovalPayload {
   rejectLabel?: string
 }
 
+export interface HitlResolutionSummary {
+  approved?: boolean
+  reason?: string
+  result?: unknown
+}
+
+export type SupportedResolvedToolPart = {
+  state: 'approval-responded' | 'output-available' | 'output-denied'
+  toolCallId: string
+  toolName?: string
+  type: string
+}
+
 export function isPendingToolCallPending(pendingToolCall: PendingToolCall): boolean {
   return pendingToolCall.status === 'pending'
 }
@@ -45,4 +58,19 @@ export function getFormPayload(pendingToolCall: PendingToolCall): HitlFormPayloa
 
 export function getApprovalPayload(pendingToolCall: PendingToolCall): HitlApprovalPayload {
   return pendingToolCall.ui_payload_json as HitlApprovalPayload
+}
+
+export function getResolvedHitlSummary(pendingToolCall: PendingToolCall): HitlResolutionSummary {
+  const resolution = pendingToolCall.resolution_json ?? {}
+
+  if ('approved' in resolution || 'reason' in resolution) {
+    return {
+      approved: resolution.approved as boolean | undefined,
+      reason: resolution.reason as string | undefined,
+    }
+  }
+
+  return {
+    result: resolution.result,
+  }
 }

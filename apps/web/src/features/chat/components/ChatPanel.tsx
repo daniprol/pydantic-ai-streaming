@@ -35,6 +35,37 @@ import type {
   UIConversationMessage,
 } from '@/types/chat'
 
+type ChatHelpers = ReturnType<typeof useChat> & {
+  addToolApprovalResponse: (payload: { approved: boolean; id: string }) => Promise<void>
+}
+
+function extractPendingToolConflictMessage(error: Error | undefined): string | null {
+  if (!error?.message) {
+    return null
+  }
+
+  try {
+    const payload = JSON.parse(error.message) as {
+      detail?: {
+        message?: string
+        pendingToolCallIds?: string[]
+      }
+    }
+    if (!payload.detail?.message) {
+      return null
+    }
+
+    const ids = payload.detail.pendingToolCallIds ?? []
+    if (ids.length === 0) {
+      return payload.detail.message
+    }
+
+    return `${payload.detail.message} Pending: ${ids.join(', ')}`
+  } catch {
+    return null
+  }
+}
+
 export function ChatPanel({
   flow,
   conversationId,
@@ -112,7 +143,7 @@ export function ChatPanel({
         })
       }
     },
-  })
+  }) as ChatHelpers
 
   useEffect(() => {
     setPendingToolCalls(initialData?.pending_tool_calls ?? [])
@@ -166,6 +197,7 @@ export function ChatPanel({
 
   const chatMessages = messages as UIConversationMessage[]
   const isBusy = isCreatingConversation || status === 'submitted' || status === 'streaming' || isSubmittingHitl
+  const pendingToolConflictMessage = extractPendingToolConflictMessage(error)
 
   function markPendingToolCallResolved(toolCallId: string, status: PendingToolCall['status']) {
     setPendingToolCalls((currentPendingToolCalls) =>
@@ -245,7 +277,7 @@ export function ChatPanel({
           )}
           {status === 'error' && error && (
             <div className="mx-auto mt-4 max-w-2xl rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-              {error.message}
+              {pendingToolConflictMessage ?? 'Unable to send your message right now.'}
             </div>
           )}
           {draftError && (

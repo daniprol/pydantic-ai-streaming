@@ -174,3 +174,31 @@ def test_extract_tool_outputs_from_resume_messages_collects_approval_and_call_re
     assert results is not None
     assert results.approvals == {'approval-call-1': True}
     assert results.calls == {'decision-call-1': {'decision': 'accepted'}}
+
+
+@pytest.mark.asyncio
+async def test_raise_pending_conflict_includes_simplified_ids(
+    db_session,
+    repository_factory,
+    conversation_factory,
+) -> None:
+    repository = repository_factory(db_session)
+    conversation = await conversation_factory(db_session)
+    pending_tool_call = await repository.create_pending_tool_call(
+        conversation_id=conversation.id,
+        tool_call_id='tool-simple',
+        pending_group_id='group-1',
+        tool_name='request_human_decision',
+        kind=PendingToolCallKind.DECISION,
+        message_sequence=1,
+        approval_id=None,
+        args_json={},
+        request_metadata_json={},
+        ui_payload_json={},
+        resume_model_messages_json=[],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        raise_pending_conflict([pending_tool_call])
+
+    assert exc_info.value.detail['pendingToolCallIds'] == ['tool-simple']

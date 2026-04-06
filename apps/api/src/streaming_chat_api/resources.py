@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -44,18 +44,25 @@ class AppResources:
 
 
 def build_agents(settings: Settings, support_client: FakeSupportClient) -> ChatAgents:
-    from pydantic_ai.durable_exec.dbos import DBOSAgent
-    from streaming_chat_api.dbos_streaming import stream_dbos_events
-
     support_agent = build_support_agent(settings, support_client)
     return ChatAgents(
         basic=support_agent,
-        dbos=DBOSAgent(
+        dbos=support_agent,
+        dbos_replay=support_agent,
+    )
+
+
+def build_dbos_agents(support_agent: object) -> tuple[object, object]:
+    from pydantic_ai.durable_exec.dbos import DBOSAgent
+    from streaming_chat_api.dbos_streaming import stream_dbos_events
+
+    return (
+        DBOSAgent(
             support_agent,
             name='support-assistant-dbos',
             event_stream_handler=stream_dbos_events,
         ),
-        dbos_replay=DBOSAgent(
+        DBOSAgent(
             support_agent,
             name='support-assistant-dbos-replay',
             event_stream_handler=stream_dbos_events,
@@ -90,9 +97,17 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
                 'system_database_url': resolved_settings.dbos_system_database_url,
             }
         )
+        dbos_agent, dbos_replay_agent = build_dbos_agents(agents.basic)
+        agents = ChatAgents(
+            basic=agents.basic,
+            dbos=dbos_agent,
+            dbos_replay=dbos_replay_agent,
+        )
         DBOS.launch()
         dbos_initialized = True
     except Exception:
+        with suppress(Exception):
+            DBOS.destroy(destroy_registry=True)
         dbos_initialized = False
 
     return AppResources(
@@ -111,6 +126,9 @@ async def create_resources(settings: Settings | None = None) -> AppResources:
 
 
 async def close_resources(resources: AppResources) -> None:
+    if resources.dbos_initialized:
+        with suppress(Exception):
+            DBOS.destroy(destroy_registry=True)
     await resources.http_client.aclose()
     await resources.redis.aclose()
     await resources.engine.dispose()

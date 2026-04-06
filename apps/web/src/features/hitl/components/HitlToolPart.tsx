@@ -1,6 +1,7 @@
 import { PendingApprovalCard } from '@/features/hitl/components/PendingApprovalCard'
 import { PendingDecisionCard } from '@/features/hitl/components/PendingDecisionCard'
 import { PendingFormCard } from '@/features/hitl/components/PendingFormCard'
+import { HitlResolvedCard } from '@/features/hitl/components/HitlResolvedCard'
 import { getToolName } from '@/features/chat/lib/messageParts'
 import type { PendingToolCall } from '@/types/chat'
 
@@ -56,7 +57,25 @@ export function HitlToolPart({
   const pendingToolCall = findPendingToolCall(pendingToolCalls, part.toolCallId)
   const toolName = 'toolName' in part && typeof part.toolName === 'string' ? part.toolName : getToolName(part)
 
-  if (!pendingToolCall || pendingToolCall.status !== 'pending') {
+  if (!pendingToolCall) {
+    return null
+  }
+
+  if (pendingToolCall.status !== 'pending') {
+    if (part.state === 'approval-responded' || part.state === 'output-available' || part.state === 'output-denied') {
+      return (
+        <HitlResolvedCard
+          part={{
+            state: part.state,
+            toolCallId: part.toolCallId,
+            toolName: toolName ?? undefined,
+            type: 'type' in part && typeof (part as { type?: string }).type === 'string' ? (part as { type: string }).type : 'tool-unknown',
+          }}
+          pendingToolCall={pendingToolCall}
+        />
+      )
+    }
+
     return null
   }
 

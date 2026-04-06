@@ -167,6 +167,11 @@ async def test_basic_flow_blocks_new_user_message_while_pending_by_default(
     )
 
     assert response.status_code == 409
+    assert (
+        response.json()['detail']['message']
+        == 'Resolve pending tool calls before sending another message.'
+    )
+    assert response.json()['detail']['pendingToolCallIds']
     assert response.json()['detail']['pending_tool_calls'][0]['kind'] == 'decision'
 
 

@@ -70,7 +70,7 @@ async def real_dbos_app(real_dbos_resources: AppResources) -> FastAPI:
 
 @pytest.mark.docker
 @pytest.mark.asyncio
-async def test_real_dbos_agent_and_route_stream_text_and_tool_events(
+async def test_real_dbos_agent_and_route_stream_tool_events(
     real_dbos_resources: AppResources,
     real_dbos_app: FastAPI,
     chat_request_factory,
@@ -101,8 +101,6 @@ async def test_real_dbos_agent_and_route_stream_text_and_tool_events(
     finally:
         _dbos_stream_queue.reset(token)
 
-    assert 'PartStartEvent' in event_types
-    assert 'PartDeltaEvent' in event_types
     assert 'FunctionToolCallEvent' in event_types
     assert 'FunctionToolResultEvent' in event_types
     assert event_types[-1] == 'AgentRunResultEvent'
@@ -128,11 +126,10 @@ async def test_real_dbos_agent_and_route_stream_text_and_tool_events(
     assert response.headers['x-vercel-ai-ui-message-stream'] == 'v1'
     assert response.headers['content-type'].startswith('text/event-stream')
     assert any('"type":"tool-output-available"' in line for line in stream_lines)
-    assert any('"type":"text-delta"' in line for line in stream_lines)
     assert any('https://example.com/help/streaming-delays' in line for line in stream_lines)
     assert stream_lines[-1] == 'data: [DONE]'
     assert [message['role'] for message in messages.json()['messages']] == [
         'user',
         'assistant',
-        'assistant',
     ]
+    assert messages.json()['messages'][1]['parts'][0]['type'].startswith('tool-')

@@ -536,5 +536,89 @@ describe('ChatPanel', () => {
 
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+    expect(screen.getByText('Human response applied')).toBeInTheDocument()
+  })
+
+  it('renders resolved form data after submission', () => {
+    chatState.messages = [
+      {
+        id: 'assistant-resolved-form',
+        role: 'assistant',
+        parts: [
+          {
+            input: { title: 'Form required' },
+            output: { email: 'name@example.com', notes: 'Customer confirmed' },
+            state: 'output-available',
+            toolCallId: 'tool-form',
+            type: 'tool-collect_human_form',
+          },
+        ],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-resolved-form"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-resolved-form',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-form',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-form',
+              request_metadata_json: {},
+              resolution_json: { result: { email: 'name@example.com', notes: 'Customer confirmed' } },
+              resolved_at: '2026-04-06T00:01:00Z',
+              status: 'resolved',
+              tool_call_id: 'tool-form',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                title: 'Form required',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Submitted data')).toBeInTheDocument()
+    expect(screen.getByText(/name@example.com/)).toBeInTheDocument()
+  })
+
+  it('renders a friendly pending-tool conflict error message', () => {
+    chatState.error = new Error(
+      JSON.stringify({
+        detail: {
+          message: 'Resolve pending tool calls before sending another message.',
+          pendingToolCallIds: ['tool-1', 'tool-2'],
+        },
+      }),
+    )
+    chatState.messages = []
+    chatState.status = 'error'
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-conflict"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-conflict',
+          flow_type: 'basic',
+          messages: [],
+          pending_tool_calls: [],
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Resolve pending tool calls before sending another message. Pending: tool-1, tool-2')).toBeInTheDocument()
   })
 })
