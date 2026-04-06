@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 
 from streaming_chat_api.resources import build_lifespan
-from streaming_chat_api.routers import api_router
+from streaming_chat_api.routers import api_router, health_router
 from streaming_chat_api.settings import Settings, get_settings
 
 
@@ -36,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=['x-replay-id', 'x-vercel-ai-ui-message-stream'],
     )
 
+    app.include_router(health_router)
     app.include_router(api_router, prefix=resolved_settings.api_v1_prefix)
 
     @app.get('/')

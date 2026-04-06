@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSearchAttributes
 
 from streaming_chat_api.models import FlowType
 from streaming_chat_api.repository import ConversationRepository
@@ -17,6 +18,7 @@ from streaming_chat_api.schemas import (
 )
 from streaming_chat_api.services.common import (
     append_user_message,
+    build_adapter,
     build_create_response,
     build_list_response,
     build_messages_response,
@@ -35,6 +37,40 @@ from streaming_chat_api.temporal_workflow import (
 
 
 FLOW_TYPE = FlowType.TEMPORAL
+CONVERSATION_ID_SEARCH_ATTRIBUTE = SearchAttributeKey.for_keyword('ConversationId')
+MODEL_NAME_SEARCH_ATTRIBUTE = SearchAttributeKey.for_keyword('ModelName')
+FLOW_TYPE_SEARCH_ATTRIBUTE = SearchAttributeKey.for_keyword('FlowType')
+CONVERSATION_ID_MEMO_KEY = 'conversation_id'
+MODEL_NAME_MEMO_KEY = 'model_name'
+FLOW_TYPE_MEMO_KEY = 'flow_type'
+
+
+def build_temporal_search_attributes(
+    *,
+    conversation_id: str,
+    model_name: str,
+) -> TypedSearchAttributes:
+    return TypedSearchAttributes(
+        [
+            SearchAttributePair(CONVERSATION_ID_SEARCH_ATTRIBUTE, conversation_id),
+            SearchAttributePair(MODEL_NAME_SEARCH_ATTRIBUTE, model_name),
+            SearchAttributePair(FLOW_TYPE_SEARCH_ATTRIBUTE, FLOW_TYPE.value),
+        ]
+    )
+
+
+def build_temporal_memo(*, conversation_id: str, model_name: str) -> dict[str, str]:
+    return {
+        CONVERSATION_ID_MEMO_KEY: conversation_id,
+        MODEL_NAME_MEMO_KEY: model_name,
+        FLOW_TYPE_MEMO_KEY: FLOW_TYPE.value,
+    }
+
+
+def get_temporal_model_name(resources: AppResources) -> str:
+    if resources.settings.use_test_model:
+        return 'test'
+    return resources.settings.azure_openai_model
 
 
 async def list_conversations(
@@ -102,12 +138,14 @@ async def stream_chat(
         )
 
     replay_id = create_replay_id()
+    model_name = get_temporal_model_name(resources)
+    adapter = build_adapter(request_body, request.headers.get('accept'), resources.agents.basic)
     workflow_input = build_temporal_workflow_input(
         conversation_id=str(conversation.id),
         replay_id=replay_id,
         request_body=request_body,
         accept=request.headers.get('accept'),
-        message_history=serialize_model_messages(history),
+        message_history=serialize_model_messages([*history, *adapter.messages]),
         deferred_tool_results=(
             None
             if parsed_request.deferred_tool_results is None
@@ -126,6 +164,14 @@ async def stream_chat(
             workflow_input,
             id=build_temporal_workflow_id(str(conversation.id), replay_id),
             task_queue=resources.settings.temporal_task_queue,
+            memo=build_temporal_memo(
+                conversation_id=str(conversation.id),
+                model_name=model_name,
+            ),
+            search_attributes=build_temporal_search_attributes(
+                conversation_id=str(conversation.id),
+                model_name=model_name,
+            ),
         )
     except Exception:
         await repository.set_active_replay_id(conversation, None)

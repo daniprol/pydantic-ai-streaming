@@ -35,17 +35,31 @@ from streaming_chat_api.support_client import FakeSupportClient
 class LocalTemporalClient:
     def __init__(self, resources: AppResources):
         self.resources = resources
-        self.started_workflows: list[dict[str, str]] = []
+        self.started_workflows: list[dict[str, object]] = []
 
     async def list_namespaces(self) -> None:
         raise RuntimeError('Temporal server is not running in unit tests.')
 
-    async def start_workflow(self, workflow_run, workflow_input, *, id: str, task_queue: str):
+    async def start_workflow(
+        self,
+        workflow_run,
+        workflow_input,
+        *,
+        id: str,
+        task_queue: str,
+        memo=None,
+        search_attributes=None,
+    ):
         self.started_workflows.append(
             {
                 'id': id,
                 'task_queue': task_queue,
                 'workflow': getattr(workflow_run, '__qualname__', str(workflow_run)),
+                'workflow_input': workflow_input,
+                'memo': memo,
+                'search_attributes': {}
+                if search_attributes is None
+                else {pair.key.name: pair.value for pair in search_attributes.search_attributes},
             }
         )
 

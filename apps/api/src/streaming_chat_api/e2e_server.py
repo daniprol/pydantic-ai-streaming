@@ -40,7 +40,16 @@ class _LocalTemporalClient:
     async def list_namespaces(self) -> None:
         raise RuntimeError('Temporal server is not running for e2e helper app.')
 
-    async def start_workflow(self, workflow_run, workflow_input, *, id: str, task_queue: str):
+    async def start_workflow(
+        self,
+        workflow_run,
+        workflow_input,
+        *,
+        id: str,
+        task_queue: str,
+        memo=None,
+        search_attributes=None,
+    ):
         adapter = build_adapter(
             workflow_input.request_body.encode('utf-8'),
             workflow_input.accept,

@@ -4,7 +4,6 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 
-from temporalio.api.workflowservice.v1.request_response_pb2 import DescribeNamespaceRequest
 from temporalio.client import Client
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.worker import Worker
@@ -25,6 +24,7 @@ from streaming_chat_api.temporal_activities import (
     finish_temporal_replay_stream,
     persist_temporal_run_output,
 )
+from streaming_chat_api.temporal_health import validate_temporal_connection
 from streaming_chat_api.temporal_runtime import (
     close_temporal_worker_runtime,
     create_temporal_worker_runtime,
@@ -50,14 +50,6 @@ def is_retryable_temporal_connection_error(error: BaseException) -> bool:
         return error.status in RETRYABLE_TEMPORAL_RPC_STATUSES
 
     return isinstance(error, OSError | ConnectionError | TimeoutError)
-
-
-async def validate_temporal_connection(client: Client, namespace: str) -> None:
-    healthy = await client.service_client.check_health()
-    if not healthy:
-        raise RuntimeError('Temporal service is not serving requests.')
-
-    await client.workflow_service.describe_namespace(DescribeNamespaceRequest(namespace=namespace))
 
 
 async def connect_temporal_client(settings: Settings) -> Client:

@@ -3,8 +3,8 @@ from fastapi import APIRouter
 from streaming_chat_api.routers import basic, dbos, dbos_replay, health, temporal
 
 
+health_router = health.router
 api_router = APIRouter()
-api_router.include_router(health.router)
 api_router.include_router(basic.router)
 api_router.include_router(dbos.router)
 api_router.include_router(temporal.router)

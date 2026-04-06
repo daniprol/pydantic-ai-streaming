@@ -18,6 +18,7 @@ from streaming_chat_api.database import create_engine, create_session_factory
 from streaming_chat_api.replay import ReplayStreamBroker
 from streaming_chat_api.settings import Settings, get_settings
 from streaming_chat_api.support_client import FakeSupportClient
+from streaming_chat_api.temporal_health import validate_temporal_connection
 
 
 @dataclass(slots=True)
@@ -150,7 +151,10 @@ async def check_temporal(resources: AppResources) -> tuple[bool, str]:
     if resources.temporal_client is None:
         return False, 'client unavailable'
     try:
-        await resources.temporal_client.list_namespaces()
+        await validate_temporal_connection(
+            resources.temporal_client,
+            resources.settings.temporal_namespace,
+        )
         return True, 'ok'
     except Exception as exc:
         return False, str(exc)

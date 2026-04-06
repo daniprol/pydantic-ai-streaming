@@ -10,7 +10,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from streaming_chat_api.settings import Settings, ThinkingLevel
+from streaming_chat_api.settings import Settings
 from streaming_chat_api.support_client import FakeSupportClient
 
 
