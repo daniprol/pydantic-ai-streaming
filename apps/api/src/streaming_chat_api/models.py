@@ -23,10 +23,33 @@ class FlowType(StrEnum):
     DBOS_REPLAY = 'dbos-replay'
 
 
+class PendingToolCallKind(StrEnum):
+    APPROVAL = 'approval'
+    DECISION = 'decision'
+    FORM = 'form'
+
+
+class PendingToolCallStatus(StrEnum):
+    PENDING = 'pending'
+    RESOLVED = 'resolved'
+    DENIED = 'denied'
+    CANCELLED = 'cancelled'
+
+
 json_type = JSON().with_variant(JSONB, 'postgresql')
 flow_type_enum = Enum(
     FlowType,
     name='flow_type',
+    values_callable=lambda enum: [item.value for item in enum],
+)
+pending_tool_call_kind_enum = Enum(
+    PendingToolCallKind,
+    name='pending_tool_call_kind',
+    values_callable=lambda enum: [item.value for item in enum],
+)
+pending_tool_call_status_enum = Enum(
+    PendingToolCallStatus,
+    name='pending_tool_call_status',
     values_callable=lambda enum: [item.value for item in enum],
 )
 
@@ -65,3 +88,31 @@ class Message(Base):
     ui_message_json: Mapped[dict] = mapped_column(json_type)
     model_messages_json: Mapped[list] = mapped_column(json_type, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PendingToolCall(Base):
+    __tablename__ = 'chat_pending_tool_call'
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey('chat_conversation.id', ondelete='CASCADE'),
+        index=True,
+    )
+    tool_call_id: Mapped[str] = mapped_column(String(255), unique=True)
+    pending_group_id: Mapped[str] = mapped_column(String(255), index=True)
+    tool_name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[PendingToolCallKind] = mapped_column(pending_tool_call_kind_enum)
+    status: Mapped[PendingToolCallStatus] = mapped_column(
+        pending_tool_call_status_enum,
+        default=PendingToolCallStatus.PENDING,
+        index=True,
+    )
+    message_sequence: Mapped[int] = mapped_column(Integer())
+    approval_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    args_json: Mapped[dict] = mapped_column(json_type, default=dict)
+    request_metadata_json: Mapped[dict] = mapped_column(json_type, default=dict)
+    ui_payload_json: Mapped[dict] = mapped_column(json_type, default=dict)
+    resolution_json: Mapped[dict | None] = mapped_column(json_type, nullable=True)
+    resume_model_messages_json: Mapped[list] = mapped_column(json_type, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

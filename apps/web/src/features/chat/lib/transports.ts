@@ -22,12 +22,15 @@ export function createTransport({ flow, conversationId, replayId }: TransportOpt
       id?: string
     }) => {
       const latestMessage = messages.at(-1)
+      const trigger = body?.trigger ?? 'submit-message'
+      const shouldSendLatestMessage = trigger === 'submit-message' && Boolean(latestMessage)
+
       return {
         body: {
           ...body,
-          trigger: body?.trigger ?? 'submit-message',
+          trigger,
           id,
-          messages: latestMessage ? [latestMessage] : [],
+          messages: latestMessage && shouldSendLatestMessage ? [latestMessage] : [],
         },
       }
     },

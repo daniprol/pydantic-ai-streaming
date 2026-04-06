@@ -70,6 +70,7 @@ describe('FlowChatPage', () => {
       conversation_id: 'conversation-1',
       flow_type: 'basic',
       messages: [],
+      pending_tool_calls: [],
     }
     conversationMessagesState.isError = false
     conversationMessagesState.error = undefined

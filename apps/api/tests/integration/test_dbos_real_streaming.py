@@ -12,10 +12,10 @@ from pydantic_ai.run import AgentRunResultEvent
 
 from streaming_chat_api.agents import AgentDependencies
 from streaming_chat_api.database import Base
+from streaming_chat_api.dbos_streaming import _dbos_stream_queue, stream_dbos_events
 from streaming_chat_api.main import create_app
 from streaming_chat_api.resources import AppResources, close_resources, create_resources
 from streaming_chat_api.settings import Settings, get_settings
-from streaming_chat_api.services.common import _dbos_stream_queue, stream_dbos_events
 
 
 @pytest.fixture

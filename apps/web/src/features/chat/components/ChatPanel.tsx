@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 import { useChat } from '@ai-sdk/react'
+import { z } from 'zod'
 
 import {
   Conversation,
@@ -25,8 +26,14 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import type { PromptInputMessage } from '@/components/ai-elements/prompt-input'
 import { ChatMessageParts } from '@/features/chat/components/MessagePart'
+import { lastAssistantMessageIsCompleteWithHitlResponses } from '@/features/chat/lib/autoSubmit'
 import { createTransport } from '@/features/chat/lib/transports'
-import type { ConversationMessagesResponse, FlowType, UIConversationMessage } from '@/types/chat'
+import type {
+  ConversationMessagesResponse,
+  FlowType,
+  PendingToolCall,
+  UIConversationMessage,
+} from '@/types/chat'
 
 export function ChatPanel({
   flow,
@@ -46,6 +53,8 @@ export function ChatPanel({
   const [input, setInput] = useState('')
   const [draftError, setDraftError] = useState<string | null>(null)
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
+  const [pendingToolCalls, setPendingToolCalls] = useState<PendingToolCall[]>(initialData?.pending_tool_calls ?? [])
+  const [isSubmittingHitl, setIsSubmittingHitl] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const initialPromptSentRef = useRef(false)
   const queryClient = useQueryClient()
@@ -57,17 +66,57 @@ export function ChatPanel({
     replayId: initialData?.active_replay_id ?? null,
   })
 
-  const { messages, sendMessage, status, error, regenerate, stop } = useChat({
+  const hitlRequestSchema = useMemo(
+    () => ({
+      hitl_request: z.object({
+        kind: z.enum(['approval', 'decision', 'form']),
+        payload: z.record(z.string(), z.unknown()),
+        status: z.enum(['pending', 'resolved', 'denied', 'cancelled']),
+        toolCallId: z.string(),
+        toolName: z.string(),
+      }),
+    }),
+    [],
+  )
+
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+    regenerate,
+    stop,
+    addToolApprovalResponse,
+    addToolOutput,
+  } = useChat({
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithHitlResponses,
     id: resolvedConversationId,
     messages: (initialData?.messages ?? []) as never,
+    dataPartSchemas: hitlRequestSchema,
     transport,
     resume: flow === 'dbos-replay' && Boolean(initialData?.active_replay_id),
+    onData: () => {
+      if (conversationId) {
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversationMessages(flow, conversationId) }).catch((queryError: unknown) => {
+          console.error('Failed to refresh pending tool calls', queryError)
+        })
+      }
+    },
     onFinish: () => {
       queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(flow) }).catch((error: unknown) => {
         console.error('Failed to refresh conversations', error)
       })
+      if (conversationId) {
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversationMessages(flow, conversationId) }).catch((queryError: unknown) => {
+          console.error('Failed to refresh conversation messages', queryError)
+        })
+      }
     },
   })
+
+  useEffect(() => {
+    setPendingToolCalls(initialData?.pending_tool_calls ?? [])
+  }, [initialData?.pending_tool_calls])
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -116,6 +165,45 @@ export function ChatPanel({
   }
 
   const chatMessages = messages as UIConversationMessage[]
+  const isBusy = isCreatingConversation || status === 'submitted' || status === 'streaming' || isSubmittingHitl
+
+  function markPendingToolCallResolved(toolCallId: string, status: PendingToolCall['status']) {
+    setPendingToolCalls((currentPendingToolCalls) =>
+      currentPendingToolCalls.map((pendingToolCall) =>
+        pendingToolCall.tool_call_id === toolCallId ? { ...pendingToolCall, status } : pendingToolCall,
+      ),
+    )
+  }
+
+  function handleApprovalResponse(approvalId: string, approved: boolean) {
+    setDraftError(null)
+    setIsSubmittingHitl(true)
+    void Promise.resolve(
+      addToolApprovalResponse({
+        approved,
+        id: approvalId,
+      }),
+    )
+      .finally(() => {
+        setIsSubmittingHitl(false)
+      })
+  }
+
+  function handleToolOutput(toolName: string, toolCallId: string, output: unknown) {
+    setDraftError(null)
+    setIsSubmittingHitl(true)
+    markPendingToolCallResolved(toolCallId, 'resolved')
+    void Promise.resolve(
+      addToolOutput({
+        tool: toolName as never,
+        toolCallId,
+        output: output as never,
+      }),
+    )
+      .finally(() => {
+        setIsSubmittingHitl(false)
+      })
+  }
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -130,8 +218,12 @@ export function ChatPanel({
           {chatMessages.map((message) => (
             <div className="mb-6 last:mb-0" key={message.id}>
               <ChatMessageParts
+                hitlBusy={isSubmittingHitl}
                 lastMessage={message.id === chatMessages.at(-1)?.id}
                 message={message}
+                onApprovalResponse={handleApprovalResponse}
+                onToolOutput={handleToolOutput}
+                pendingToolCalls={pendingToolCalls}
                 regen={(messageId) => {
                   regenerate({ messageId }).catch((regenError: unknown) => {
                     console.error('Failed to regenerate message', regenError)
@@ -178,7 +270,7 @@ export function ChatPanel({
                 }
               }}
               className="max-h-40"
-              disabled={isCreatingConversation || status === 'submitted' || status === 'streaming'}
+              disabled={isBusy}
               placeholder="Ask about an order, service health, or support policy..."
             />
 
@@ -194,7 +286,7 @@ export function ChatPanel({
               </PromptInputTools>
               <PromptInputSubmit
                 disabled={
-                  isCreatingConversation || (!input.trim() && status !== 'submitted' && status !== 'streaming')
+                  isCreatingConversation || isSubmittingHitl || (!input.trim() && status !== 'submitted' && status !== 'streaming')
                 }
                 onStop={
                   conversationId
@@ -205,7 +297,7 @@ export function ChatPanel({
                       }
                     : undefined
                 }
-                status={isCreatingConversation ? 'submitted' : status}
+                status={isBusy ? 'submitted' : status}
               />
             </PromptInputFooter>
           </PromptInput>

@@ -165,6 +165,15 @@ def test_settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
+def allow_continue_settings(tmp_path: Path) -> Settings:
+    database_path = tmp_path / 'allow-continue.db'
+    return build_settings(
+        database_url=f'sqlite+aiosqlite:///{database_path}',
+        pending_tool_policy='allow_continue',
+    )
+
+
+@pytest.fixture
 def llm_settings() -> Settings:
     get_settings.cache_clear()
     return Settings()
@@ -209,6 +218,14 @@ async def resources(test_settings: Settings) -> AsyncIterator[AppResources]:
 
 
 @pytest.fixture
+async def allow_continue_resources(
+    allow_continue_settings: Settings,
+) -> AsyncIterator[AppResources]:
+    async for resource_bundle in build_test_resources(allow_continue_settings):
+        yield resource_bundle
+
+
+@pytest.fixture
 async def real_resources(real_test_settings: Settings) -> AsyncIterator[AppResources]:
     async for resource_bundle in build_test_resources(real_test_settings):
         yield resource_bundle
@@ -243,6 +260,24 @@ async def app(resources: AppResources, test_settings: Settings) -> AsyncIterator
     async def test_lifespan(_: FastAPI):
         app.state.resources = resources
         app.state.settings = test_settings
+        yield
+
+    app.router.lifespan_context = test_lifespan
+    yield app
+
+
+@pytest.fixture
+async def allow_continue_app(
+    allow_continue_resources: AppResources,
+    allow_continue_settings: Settings,
+) -> AsyncIterator[FastAPI]:
+    get_settings.cache_clear()
+    app = create_app(allow_continue_settings)
+
+    @asynccontextmanager
+    async def test_lifespan(_: FastAPI):
+        app.state.resources = allow_continue_resources
+        app.state.settings = allow_continue_settings
         yield
 
     app.router.lifespan_context = test_lifespan
@@ -306,6 +341,14 @@ async def api_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.fixture
+async def allow_continue_api_client(allow_continue_app: FastAPI) -> AsyncIterator[AsyncClient]:
+    async with LifespanManager(allow_continue_app):
+        transport = httpx.ASGITransport(app=allow_continue_app)
+        async with AsyncClient(transport=transport, base_url='http://testserver') as client:
+            yield client
+
+
+@pytest.fixture
 async def real_api_client(real_app: FastAPI) -> AsyncIterator[AsyncClient]:
     async with LifespanManager(real_app):
         transport = httpx.ASGITransport(app=real_app)
@@ -330,6 +373,7 @@ def chat_request_factory():
         message_id: str = 'message-1',
         trigger: str = 'submit-message',
         deferred_tool_results: dict | None = None,
+        messages: list[dict] | None = None,
     ) -> dict:
         body: dict = {
             'trigger': trigger,
@@ -338,7 +382,9 @@ def chat_request_factory():
         }
         if message_id is not None:
             body['messageId'] = message_id
-        if text is not None:
+        if messages is not None:
+            body['messages'] = messages
+        elif text is not None:
             body['messages'] = [
                 {
                     'id': message_id,

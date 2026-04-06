@@ -5,7 +5,7 @@ import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-e
 import { Response } from '@/components/ai-elements/response'
 import { Tool } from '@/components/ai-elements/tool'
 import { Badge } from '@/components/ui/badge'
-import type { UIConversationMessage } from '@/types/chat'
+import type { PendingToolCall, UIConversationMessage } from '@/types/chat'
 import { CopyIcon, RefreshCcwIcon, WrenchIcon } from 'lucide-react'
 
 import {
@@ -19,6 +19,7 @@ import {
   segmentMessageParts,
   type ConversationPart,
 } from '@/features/chat/lib/messageParts'
+import { HitlToolPart } from '@/features/hitl/components/HitlToolPart'
 
 interface MessagePartProps {
   part: ConversationPart
@@ -34,6 +35,10 @@ interface ChatMessagePartsProps {
   status: string
   regen: (id: string) => void
   lastMessage: boolean
+  pendingToolCalls?: PendingToolCall[]
+  hitlBusy?: boolean
+  onApprovalResponse?: (approvalId: string, approved: boolean) => void
+  onToolOutput?: (toolName: string, toolCallId: string, output: unknown) => void
 }
 
 function copy(text: string) {
@@ -138,8 +143,17 @@ export function MessagePart({ part, message, status, regen, index, lastMessage }
   return null
 }
 
-export function ChatMessageParts({ message, status, regen, lastMessage }: ChatMessagePartsProps) {
-  return segmentMessageParts(message.parts).map((segment) => {
+export function ChatMessageParts({
+  message,
+  status,
+  regen,
+  lastMessage,
+  pendingToolCalls = [],
+  hitlBusy = false,
+  onApprovalResponse,
+  onToolOutput,
+}: ChatMessagePartsProps) {
+  const content = segmentMessageParts(message.parts).map((segment) => {
     if (segment.kind === 'tool-group') {
       return (
         <ToolCallGroup
@@ -152,15 +166,29 @@ export function ChatMessageParts({ message, status, regen, lastMessage }: ChatMe
     }
 
     return (
-      <MessagePart
-        index={segment.index}
-        key={`${message.id}-${segment.index}`}
-        lastMessage={lastMessage}
-        message={message}
-        part={segment.part}
-        regen={regen}
-        status={status}
-      />
+      <div key={`${message.id}-${segment.index}`}>
+        <MessagePart
+          index={segment.index}
+          lastMessage={lastMessage}
+          message={message}
+          part={segment.part}
+          regen={regen}
+          status={status}
+        />
+        {onApprovalResponse && onToolOutput ? (
+          <HitlToolPart
+            disabled={hitlBusy}
+            onApprovalResponse={onApprovalResponse}
+            onToolOutput={onToolOutput}
+            part={segment.part}
+            pendingToolCalls={pendingToolCalls}
+          />
+        ) : null}
+      </div>
     )
   })
+
+  return (
+    <>{content}</>
+  )
 }

@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine.url import make_url
 
 ThinkingLevel = Literal['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+PendingToolPolicy = Literal['block', 'allow_continue']
 
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -88,6 +89,7 @@ class Settings(BaseSettings):
     azure_openai_model: str = 'gpt-5-mini'
     thinking_level: ThinkingLevel = 'minimal'
     use_test_model: bool = False
+    pending_tool_policy: PendingToolPolicy = 'block'
 
     @property
     def is_dev(self) -> bool:

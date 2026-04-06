@@ -61,5 +61,6 @@ async def test_alembic_migration_creates_chat_tables(postgres_dsn: str) -> None:
         assert 'alembic_version' in tables
         assert 'chat_conversation' in tables
         assert 'chat_message' in tables
+        assert 'chat_pending_tool_call' in tables
     finally:
         await engine.dispose()

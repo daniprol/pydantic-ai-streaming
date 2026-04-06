@@ -6,7 +6,8 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.run import AgentRunResultEvent
 
-from streaming_chat_api.services.common import build_adapter, run_dbos_adapter_stream
+from streaming_chat_api.dbos_streaming import run_dbos_adapter_stream
+from streaming_chat_api.services.common import build_adapter
 from streaming_chat_api.support_client import FakeSupportClient
 
 

@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelMessagesTypeAdapter,
     ModelRequest,
+    UserPromptPart,
 )
 from pydantic_ai.tools import DeferredToolResults, RunContext
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
@@ -34,6 +35,13 @@ from streaming_chat_api.schemas import (
     ConversationMessagesResponse,
     ConversationSummary,
     OffsetPaginationParams,
+    PendingToolCallResponse,
+)
+from streaming_chat_api.services.hitl import (
+    hydrate_hitl_ui_message,
+    pending_tool_call_to_response,
+    persist_pending_tool_calls,
+    result_output_is_deferred_requests,
 )
 from streaming_chat_api.ui import replay_stream_response
 
@@ -42,6 +50,7 @@ from streaming_chat_api.ui import replay_stream_response
 class ParsedChatRequest:
     deferred_tool_results: DeferredToolResults | None
     new_message: UIMessage | None
+    resume_messages: list[UIMessage]
 
 
 REPLAY_ID_HEADER = 'x-replay-id'
@@ -93,12 +102,27 @@ def build_create_response(conversation: Conversation) -> ConversationCreateRespo
 def build_messages_response(
     conversation: Conversation,
     messages: list[dict],
+    pending_tool_calls: Sequence[PendingToolCallResponse] | None = None,
 ) -> ConversationMessagesResponse:
+    pending_tool_call_list = list(pending_tool_calls or [])
+    hydrated_messages: list[dict] = []
+    for message in messages:
+        if message.get('role') != 'assistant':
+            hydrated_messages.append(message)
+            continue
+        hydrated_messages.append(
+            hydrate_hitl_ui_message(
+                assistant_message=message,
+                pending_tool_calls=pending_tool_call_list,
+            )
+        )
+
     return ConversationMessagesResponse(
         conversation_id=conversation.id,
         flow_type=conversation.flow_type,
         active_replay_id=conversation.active_replay_id,
-        messages=messages,
+        messages=hydrated_messages,
+        pending_tool_calls=pending_tool_call_list,
     )
 
 
@@ -122,14 +146,19 @@ def parse_chat_request(request_body: bytes) -> ParsedChatRequest:
         )
 
     new_message = None
+    resume_messages: list[UIMessage] = []
     if payload.trigger == 'submit-message':
         for message in reversed(ui_messages):
             if message.role == 'user':
                 new_message = message
                 break
 
+        if new_message is None:
+            resume_messages = [message for message in ui_messages if message.role == 'assistant']
+
     if (
         new_message is None
+        and not resume_messages
         and deferred_tool_results is None
         and payload.trigger != 'regenerate-message'
     ):
@@ -141,6 +170,7 @@ def parse_chat_request(request_body: bytes) -> ParsedChatRequest:
     return ParsedChatRequest(
         deferred_tool_results=deferred_tool_results,
         new_message=new_message,
+        resume_messages=resume_messages,
     )
 
 
@@ -194,24 +224,37 @@ async def persist_assistant_model_messages(
     repository: ConversationRepository,
     conversation: Conversation,
     new_messages: Sequence[ModelMessage],
+    result_output: Any | None = None,
     clear_active_replay_id: bool = False,
 ) -> None:
     assistant_messages = list(new_messages)
     if assistant_messages and isinstance(assistant_messages[0], ModelRequest):
-        assistant_messages = assistant_messages[1:]
+        if all(isinstance(part, UserPromptPart) for part in assistant_messages[0].parts):
+            assistant_messages = assistant_messages[1:]
 
     if assistant_messages:
         ui_messages = VercelAIAdapter.dump_messages(assistant_messages)
         assistant_ui_messages = [message for message in ui_messages if message.role == 'assistant']
         if assistant_ui_messages:
             next_sequence = await repository.next_sequence(conversation.id)
+            pending_tool_calls = []
+            if result_output_is_deferred_requests(result_output):
+                pending_tool_calls = await persist_pending_tool_calls(
+                    repository=repository,
+                    conversation=conversation,
+                    requests=result_output,
+                    message_sequence=next_sequence,
+                    resume_model_messages=assistant_messages,
+                )
+
             serialized_assistant_messages = serialize_model_messages(assistant_messages)
             for index, assistant_message in enumerate(assistant_ui_messages):
+                assistant_message_json = assistant_message.model_dump(mode='json', by_alias=True)
                 await repository.append_message(
                     conversation_id=conversation.id,
                     role='assistant',
                     sequence=next_sequence + index,
-                    ui_message_json=assistant_message.model_dump(mode='json'),
+                    ui_message_json=assistant_message_json,
                     model_messages_json=serialized_assistant_messages if index == 0 else [],
                 )
             preview = preview_from_messages(assistant_ui_messages)
@@ -231,7 +274,7 @@ async def persist_assistant_messages(
     session: AsyncSession,
     repository: ConversationRepository,
     conversation: Conversation,
-    result: AgentRunResult[str],
+    result: AgentRunResult[Any],
     clear_active_replay_id: bool = False,
 ) -> None:
     await persist_assistant_model_messages(
@@ -239,6 +282,7 @@ async def persist_assistant_messages(
         repository=repository,
         conversation=conversation,
         new_messages=result.new_messages(),
+        result_output=result.output,
         clear_active_replay_id=clear_active_replay_id,
     )
 
@@ -259,9 +303,42 @@ def build_adapter(request_body: bytes, accept: str | None, agent: Any) -> Vercel
             agent=agent,
             run_input=run_input,
             accept=accept,
+            sdk_version=6,
         )
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
+
+
+def build_adapter_request_body(
+    request_body: bytes,
+    *,
+    parsed_request: ParsedChatRequest,
+) -> bytes:
+    if (
+        parsed_request.new_message is not None
+        and parsed_request.deferred_tool_results is None
+        and not parsed_request.resume_messages
+    ):
+        return request_body
+    try:
+        payload = json.loads(request_body)
+    except JSONDecodeError:
+        return request_body
+    if parsed_request.new_message is None:
+        payload['messages'] = []
+    else:
+        payload['messages'] = [parsed_request.new_message.model_dump(mode='json', by_alias=True)]
+    return json.dumps(payload).encode('utf-8')
+
+
+async def load_pending_tool_call_responses(
+    repository: ConversationRepository,
+    conversation_id: UUID,
+) -> list[PendingToolCallResponse]:
+    pending_tool_calls = await repository.list_pending_tool_calls(conversation_id)
+    return [
+        pending_tool_call_to_response(pending_tool_call) for pending_tool_call in pending_tool_calls
+    ]
 
 
 def create_replay_id() -> str:
