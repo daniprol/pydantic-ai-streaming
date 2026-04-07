@@ -26,7 +26,6 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import type { PromptInputMessage } from '@/components/ai-elements/prompt-input'
 import { ChatMessageParts } from '@/features/chat/components/MessagePart'
-import { lastAssistantMessageIsCompleteWithHitlResponses } from '@/features/chat/lib/autoSubmit'
 import { createTransport } from '@/features/chat/lib/transports'
 import type {
   ConversationMessagesResponse,
@@ -55,12 +54,7 @@ function extractPendingToolConflictMessage(error: Error | undefined): string | n
       return null
     }
 
-    const ids = payload.detail.pendingToolCallIds ?? []
-    if (ids.length === 0) {
-      return payload.detail.message
-    }
-
-    return `${payload.detail.message} Pending: ${ids.join(', ')}`
+    return payload.detail.message
   } catch {
     return null
   }
@@ -120,7 +114,6 @@ export function ChatPanel({
     addToolApprovalResponse,
     addToolOutput,
   } = useChat({
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithHitlResponses,
     id: resolvedConversationId,
     messages: (initialData?.messages ?? []) as never,
     dataPartSchemas: hitlRequestSchema,
@@ -224,7 +217,10 @@ export function ChatPanel({
   function handleToolOutput(toolName: string, toolCallId: string, output: unknown) {
     setDraftError(null)
     setIsSubmittingHitl(true)
-    markPendingToolCallResolved(toolCallId, 'resolved')
+    const nextStatus = typeof output === 'object' && output !== null && 'status' in (output as Record<string, unknown>) && (output as Record<string, unknown>).status === 'cancelled'
+      ? 'cancelled'
+      : 'resolved'
+    markPendingToolCallResolved(toolCallId, nextStatus)
     void Promise.resolve(
       addToolOutput({
         tool: toolName as never,
@@ -232,14 +228,19 @@ export function ChatPanel({
         output: output as never,
       }),
     )
+      .then(() => sendMessage())
       .finally(() => {
         setIsSubmittingHitl(false)
       })
   }
 
+  function handleFormCancel(toolName: string, toolCallId: string) {
+    handleToolOutput(toolName, toolCallId, { status: 'cancelled' })
+  }
+
   return (
-    <div className="relative flex h-full flex-col overflow-hidden">
-      <Conversation className="flex-1 min-h-0">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl px-4 py-8">
           {chatMessages.length === 0 && status === 'ready' && !isCreatingConversation && (
             <ConversationEmptyState
@@ -254,6 +255,7 @@ export function ChatPanel({
                 lastMessage={message.id === chatMessages.at(-1)?.id}
                 message={message}
                 onApprovalResponse={handleApprovalResponse}
+                onFormCancel={handleFormCancel}
                 onToolOutput={handleToolOutput}
                 pendingToolCalls={pendingToolCalls}
                 regen={(messageId) => {
@@ -289,7 +291,7 @@ export function ChatPanel({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="sticky bottom-0 w-full border-t border-border/50 bg-background/95 px-4 pt-4 pb-6 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <div className="shrink-0 border-t border-border/50 bg-background/95 px-4 pt-4 pb-6 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="mx-auto max-w-3xl">
           <PromptInput onSubmit={handleSubmit}>
             <PromptInputTextarea

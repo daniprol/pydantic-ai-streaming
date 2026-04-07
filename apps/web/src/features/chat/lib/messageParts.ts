@@ -73,6 +73,11 @@ export function isToolPart(part: ConversationPart): boolean {
   )
 }
 
+export function isHitlToolPart(part: ConversationPart): boolean {
+  const toolName = getToolName(part)
+  return toolName === 'request_human_approval' || toolName === 'request_human_decision' || toolName === 'collect_human_form'
+}
+
 export function getToolName(part: ConversationPart): string | null {
   if (!isRecord(part)) {
     return null

@@ -1,4 +1,8 @@
+from uuid import UUID
+
 import pytest
+
+from streaming_chat_api.repository import ConversationRepository
 
 
 @pytest.mark.asyncio
@@ -286,7 +290,344 @@ async def test_basic_flow_streams_form_payload_data_chunk(
     assert 'data-hitl-request' in response.text
     pending_tool_calls = messages.json()['pending_tool_calls']
     assert pending_tool_calls[0]['kind'] == 'form'
-    assert pending_tool_calls[0]['ui_payload_json']['schema']['fields'][0]['name'] == 'email'
+    assert pending_tool_calls[0]['ui_payload_json']['fields'][0]['name'] == 'name'
+    assert pending_tool_calls[0]['ui_payload_json']['fields'][1]['kind'] == 'email'
+    assert (
+        pending_tool_calls[0]['ui_payload_json']['schema']['properties']['fields']['type']
+        == 'array'
+    )
+
+
+@pytest.mark.asyncio
+async def test_basic_flow_marks_cancelled_form_submission_as_cancelled(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-form] Collect the customer onboarding preferences using the human form tool.'
+        ),
+    )
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='request-native-form-cancel',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'input': {
+                                'title': 'New User Onboarding Preference Form',
+                                'description': 'Collect onboarding details.',
+                            },
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    refreshed_messages = await api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert response.status_code == 200
+    assert refreshed_messages.json()['pending_tool_calls'][0]['status'] == 'cancelled'
+
+
+@pytest.mark.asyncio
+async def test_basic_flow_accepts_new_message_with_cancelled_form_resolution_even_when_pending_blocks(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-form] Collect the customer onboarding preferences using the human form tool.'
+        ),
+    )
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            'What did I do?',
+            request_id='request-cancel-and-message',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'input': {
+                                'title': 'Quick info form',
+                                'description': 'Collect the minimum customer details before proceeding.',
+                            },
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                },
+                {
+                    'id': 'user-next',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'What did I do?'}],
+                },
+            ],
+        ),
+    )
+    refreshed_messages = await api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert response.status_code == 200
+    assert refreshed_messages.json()['pending_tool_calls'][0]['status'] == 'cancelled'
+    assert refreshed_messages.json()['messages'][-1]['role'] == 'assistant'
+
+
+@pytest.mark.asyncio
+async def test_basic_flow_accepts_new_message_after_reopening_cancelled_form_resolution(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-form] Collect the customer onboarding preferences using the human form tool.'
+        ),
+    )
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    cancel_response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='request-native-form-cancel-reopen',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'input': {
+                                'title': 'Quick info form',
+                                'description': 'Collect the minimum customer details before proceeding.',
+                            },
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    reopened_messages = await api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+    reopened_pending_tool_call = reopened_messages.json()['pending_tool_calls'][0]
+    hydrated_assistant_message = next(
+        message
+        for message in reopened_messages.json()['messages']
+        if message['id'] == assistant_message['id']
+    )
+
+    follow_up_response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            'Did I cancel that form?',
+            request_id='request-after-reopen-cancel',
+            message_id='user-after-reopen-cancel',
+            messages=[
+                hydrated_assistant_message,
+                {
+                    'id': 'user-after-reopen-cancel',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'Did I cancel that form?'}],
+                },
+            ],
+        ),
+    )
+
+    assert cancel_response.status_code == 200
+    assert reopened_pending_tool_call['status'] == 'cancelled'
+    assert hydrated_assistant_message['parts'][0]['state'] == 'output-available'
+    assert hydrated_assistant_message['parts'][0]['output'] == {'status': 'cancelled'}
+    assert follow_up_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_basic_flow_accepts_real_minimal_cancelled_form_follow_up_request_shape(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-form] Collect the customer onboarding preferences using the human form tool.'
+        ),
+    )
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='request-native-form-cancel-minimal',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+
+    follow_up_response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json={
+            'trigger': 'submit-message',
+            'id': str(conversation_id),
+            'messages': [
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'output': {'status': 'cancelled'},
+                            'state': 'output-available',
+                            'toolCallId': tool_call_id,
+                            'type': 'tool-collect_human_form',
+                        }
+                    ],
+                },
+                {
+                    'id': 'user-minimal-follow-up',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'what did i do?'}],
+                },
+            ],
+        },
+    )
+
+    assert follow_up_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_basic_flow_accepts_new_message_after_reopening_rejected_decision_resolution(
+    api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-decision] Ask a human to accept or reject whether we should proceed.'
+        ),
+    )
+    messages = await api_client.get(f'/api/v1/flows/basic/conversations/{conversation_id}/messages')
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    reject_response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='request-native-decision-reject-reopen',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-request_human_decision',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'input': {
+                                'title': 'Decision required',
+                                'description': 'Choose whether to proceed.',
+                            },
+                            'output': {'decision': 'rejected'},
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    reopened_messages = await api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+    reopened_pending_tool_call = reopened_messages.json()['pending_tool_calls'][0]
+    hydrated_assistant_message = next(
+        message
+        for message in reopened_messages.json()['messages']
+        if message['id'] == assistant_message['id']
+    )
+
+    follow_up_response = await api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            'Was that rejected?',
+            request_id='request-after-reopen-reject',
+            message_id='user-after-reopen-reject',
+            messages=[
+                hydrated_assistant_message,
+                {
+                    'id': 'user-after-reopen-reject',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'Was that rejected?'}],
+                },
+            ],
+        ),
+    )
+
+    assert reject_response.status_code == 200
+    assert reopened_pending_tool_call['status'] == 'denied'
+    assert hydrated_assistant_message['parts'][0]['state'] == 'output-available'
+    assert hydrated_assistant_message['parts'][0]['output'] == {'decision': 'rejected'}
+    assert follow_up_response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -309,6 +650,145 @@ async def test_basic_flow_allows_new_message_when_pending_policy_is_allow_contin
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_allow_continue_detaches_pending_branch_from_main_model_history(
+    allow_continue_api_client,
+    allow_continue_resources,
+    chat_request_factory,
+) -> None:
+    create_response = await allow_continue_api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-decision] Ask a human to accept or reject whether we should proceed.'
+        ),
+    )
+
+    async with allow_continue_resources.session_factory() as session:
+        repository = ConversationRepository(session)
+        messages = await repository.list_messages(UUID(conversation_id))
+
+    assistant_message = next(message for message in messages if message.role == 'assistant')
+    assert assistant_message.model_messages_json == []
+
+
+@pytest.mark.asyncio
+async def test_allow_continue_late_cancel_resolution_returns_empty_completion_without_new_assistant_turn(
+    allow_continue_api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await allow_continue_api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-form] Collect the customer onboarding preferences using the human form tool.'
+        ),
+    )
+    messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+    assistant_message = messages.json()['messages'][-1]
+    tool_call_id = messages.json()['pending_tool_calls'][0]['tool_call_id']
+
+    follow_up_response = await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            'Keep chatting while pending', request_id='follow-up-while-pending'
+        ),
+    )
+    cancel_response = await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='late-form-cancel',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': tool_call_id,
+                            'state': 'output-available',
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    refreshed_messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert follow_up_response.status_code == 200
+    assert cancel_response.status_code == 200
+    assert 'data: [DONE]' in cancel_response.text
+    assert [message['role'] for message in refreshed_messages.json()['messages']].count(
+        'assistant'
+    ) == 3
+    assert refreshed_messages.json()['pending_tool_calls'][0]['status'] == 'cancelled'
+
+
+@pytest.mark.asyncio
+async def test_allow_continue_late_approval_resolution_resumes_branch_without_follow_up_messages(
+    allow_continue_api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await allow_continue_api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-approval] Before doing anything else, ask for human approval to proceed with a refund action.'
+        ),
+    )
+    messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+    assistant_message = messages.json()['messages'][-1]
+    pending_tool_call = messages.json()['pending_tool_calls'][0]
+
+    response = await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            None,
+            request_id='late-approval-accept',
+            messages=[
+                {
+                    'id': assistant_message['id'],
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-request_human_approval',
+                            'toolCallId': pending_tool_call['tool_call_id'],
+                            'state': 'approval-responded',
+                            'approval': {
+                                'id': pending_tool_call['approval_id'],
+                                'approved': True,
+                            },
+                        }
+                    ],
+                }
+            ],
+        ),
+    )
+    refreshed_messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert response.status_code == 200
+    assert refreshed_messages.json()['pending_tool_calls'][0]['status'] == 'resolved'
+    assert [message['role'] for message in refreshed_messages.json()['messages']].count(
+        'assistant'
+    ) == 1
 
 
 @pytest.mark.asyncio

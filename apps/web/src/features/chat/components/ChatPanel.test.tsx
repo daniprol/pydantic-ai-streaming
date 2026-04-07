@@ -328,15 +328,16 @@ describe('ChatPanel', () => {
               tool_name: 'collect_human_form',
               ui_payload_json: {
                 schema: {
-                  fields: [
-                    {
-                      kind: 'text',
-                      label: 'Email',
-                      name: 'email',
-                      required: true,
-                    },
-                  ],
+                  properties: {},
                 },
+                fields: [
+                  {
+                    kind: 'email',
+                    label: 'Email',
+                    name: 'email',
+                    required: true,
+                  },
+                ],
                 submitLabel: 'Send form',
                 title: 'Form required',
               },
@@ -397,15 +398,16 @@ describe('ChatPanel', () => {
               tool_name: 'collect_human_form',
               ui_payload_json: {
                 schema: {
-                  fields: [
-                    {
-                      kind: 'text',
-                      label: 'Email',
-                      name: 'email',
-                      required: true,
-                    },
-                  ],
+                  properties: {},
                 },
+                fields: [
+                  {
+                    kind: 'email',
+                    label: 'Email',
+                    name: 'email',
+                    required: true,
+                  },
+                ],
                 submitLabel: 'Send form',
                 title: 'Form required',
               },
@@ -536,7 +538,7 @@ describe('ChatPanel', () => {
 
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
-    expect(screen.getByText('Human response applied')).toBeInTheDocument()
+    expect(screen.getByText('Approved')).toBeInTheDocument()
   })
 
   it('renders resolved form data after submission', () => {
@@ -581,6 +583,11 @@ describe('ChatPanel', () => {
               tool_call_id: 'tool-form',
               tool_name: 'collect_human_form',
               ui_payload_json: {
+                description: 'Please confirm the customer onboarding details.',
+                fields: [
+                  { kind: 'email', label: 'Email', name: 'email', required: true },
+                  { kind: 'textarea', label: 'Notes', name: 'notes', required: false },
+                ],
                 title: 'Form required',
               },
             },
@@ -589,8 +596,306 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.getByText('Submitted data')).toBeInTheDocument()
+    expect(screen.getByText('Submitted')).toBeInTheDocument()
     expect(screen.getByText(/name@example.com/)).toBeInTheDocument()
+    expect(screen.getByText('Email')).toBeInTheDocument()
+    expect(screen.getByText('Please confirm the customer onboarding details.')).toBeInTheDocument()
+    expect(screen.queryByText(/Tool call:/)).not.toBeInTheDocument()
+  })
+
+  it('allows cancelling a pending form and resumes via tool output', async () => {
+    const user = userEvent.setup()
+    chatState.messages = [
+      {
+        id: 'assistant-cancel-form',
+        role: 'assistant',
+        parts: [
+          { type: 'tool-collect_human_form', state: 'input-available', toolCallId: 'tool-cancel-form' },
+        ],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-cancel-form"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-cancel-form',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-cancel-form',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-cancel-form',
+              request_metadata_json: {},
+              resolution_json: null,
+              resolved_at: null,
+              status: 'pending',
+              tool_call_id: 'tool-cancel-form',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                cancelLabel: 'Cancel',
+                fields: [
+                  { kind: 'email', label: 'Email', name: 'email', required: true },
+                ],
+                schema: { properties: {} },
+                submitLabel: 'Send form',
+                title: 'Form required',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(chatState.addToolOutput).toHaveBeenCalledWith({
+      output: {
+        status: 'cancelled',
+      },
+      tool: 'collect_human_form',
+      toolCallId: 'tool-cancel-form',
+    })
+  })
+
+  it('resumes immediately after cancelling a form before allowing the next user message', async () => {
+    const user = userEvent.setup()
+    chatState.messages = [
+      {
+        id: 'assistant-cancel-followup',
+        role: 'assistant',
+        parts: [{ type: 'tool-collect_human_form', state: 'input-available', toolCallId: 'tool-cancel-followup' }],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-cancel-followup"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-cancel-followup',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-cancel-followup',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-cancel-followup',
+              request_metadata_json: {},
+              resolution_json: null,
+              resolved_at: null,
+              status: 'pending',
+              tool_call_id: 'tool-cancel-followup',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                cancelLabel: 'Cancel',
+                fields: [{ kind: 'email', label: 'Email', name: 'email', required: true }],
+                submitLabel: 'Send form',
+                title: 'Quick info form',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(chatState.sendMessage).toHaveBeenCalledWith()
+
+    chatState.sendMessage.mockClear()
+
+    await user.type(screen.getByPlaceholderText('Ask about an order, service health, or support policy...'), 'what did i do?')
+    await user.click(screen.getByRole('button', { name: 'Submit' }))
+
+    expect(chatState.sendMessage).toHaveBeenCalledWith({ text: 'what did i do?' })
+  })
+
+  it('renders cancelled forms as a compact summary', () => {
+    chatState.messages = [
+      {
+        id: 'assistant-cancelled-form',
+        role: 'assistant',
+        parts: [
+          {
+            input: { title: 'Preferences form' },
+            output: { status: 'cancelled' },
+            state: 'output-available',
+            toolCallId: 'tool-cancelled-form',
+            type: 'tool-collect_human_form',
+          },
+        ],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-cancelled-form"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-cancelled-form',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-cancelled-form',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-cancelled-form',
+              request_metadata_json: {},
+              resolution_json: { result: { status: 'cancelled' } },
+              resolved_at: '2026-04-06T00:01:00Z',
+              status: 'cancelled',
+              tool_call_id: 'tool-cancelled-form',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                description: 'Collect the minimum customer details before proceeding.',
+                fields: [{ kind: 'email', label: 'Email', name: 'email', required: true }],
+                title: 'Preferences form',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Cancelled')).toBeInTheDocument()
+    expect(screen.getByText('Collect the minimum customer details before proceeding.')).toBeInTheDocument()
+    expect(screen.getByText('The form was cancelled and the conversation can continue.')).toBeInTheDocument()
+  })
+
+  it('renders cancelled forms as cancelled summaries after reopening a conversation', () => {
+    chatState.messages = [
+      {
+        id: 'assistant-reopened-cancelled-form',
+        role: 'assistant',
+        parts: [
+          {
+            input: { title: 'Quick info form' },
+            output: { status: 'cancelled' },
+            state: 'output-available',
+            toolCallId: 'tool-reopened-cancelled-form',
+            type: 'tool-collect_human_form',
+          },
+        ],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-reopened-cancelled-form"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-reopened-cancelled-form',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-reopened-cancelled-form',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-reopened-cancelled-form',
+              request_metadata_json: {},
+              resolution_json: { result: { status: 'cancelled' } },
+              resolved_at: '2026-04-06T00:01:00Z',
+              status: 'cancelled',
+              tool_call_id: 'tool-reopened-cancelled-form',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                description: 'Please collect: name (optional), email (optional), and a brief description of your request.',
+                fields: [{ kind: 'email', label: 'Email', name: 'email', required: false }],
+                title: 'Quick info form',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getByText('Cancelled')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send preferences' })).not.toBeInTheDocument()
+  })
+
+  it('renders duplicate resolved HITL tool calls only once per tool call id', () => {
+    chatState.messages = [
+      {
+        id: 'assistant-duplicate-cancelled-form',
+        role: 'assistant',
+        parts: [
+          {
+            input: { title: 'Preferences form' },
+            output: { status: 'cancelled' },
+            state: 'output-available',
+            toolCallId: 'tool-duplicate-form',
+            type: 'tool-collect_human_form',
+          },
+          {
+            input: { title: 'Preferences form' },
+            output: { status: 'cancelled' },
+            state: 'output-available',
+            toolCallId: 'tool-duplicate-form',
+            type: 'tool-collect_human_form',
+          },
+        ],
+      },
+    ]
+
+    renderWithProviders(
+      <ChatPanel
+        conversationId="conversation-duplicate-cancelled-form"
+        flow="basic"
+        initialData={{
+          active_replay_id: null,
+          conversation_id: 'conversation-duplicate-cancelled-form',
+          flow_type: 'basic',
+          messages: chatState.messages,
+          pending_tool_calls: [
+            {
+              approval_id: null,
+              args_json: {},
+              created_at: '2026-04-06T00:00:00Z',
+              id: 'pending-duplicate-cancelled-form',
+              kind: 'form',
+              message_sequence: 1,
+              pending_group_id: 'group-duplicate-cancelled-form',
+              request_metadata_json: {},
+              resolution_json: { result: { status: 'cancelled' } },
+              resolved_at: '2026-04-06T00:01:00Z',
+              status: 'cancelled',
+              tool_call_id: 'tool-duplicate-form',
+              tool_name: 'collect_human_form',
+              ui_payload_json: {
+                fields: [{ kind: 'email', label: 'Email', name: 'email', required: true }],
+                title: 'Preferences form',
+              },
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getAllByText('The form was cancelled and the conversation can continue.')).toHaveLength(1)
   })
 
   it('renders a friendly pending-tool conflict error message', () => {
@@ -619,6 +924,7 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(screen.getByText('Resolve pending tool calls before sending another message. Pending: tool-1, tool-2')).toBeInTheDocument()
+    expect(screen.getByText('Resolve pending tool calls before sending another message.')).toBeInTheDocument()
+    expect(screen.queryByText(/tool-1/)).not.toBeInTheDocument()
   })
 })

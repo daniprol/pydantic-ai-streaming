@@ -103,6 +103,7 @@ async def stream_chat(
             session=session,
             repository=repository,
             conversation=conversation,
+            settings=resources.settings,
             result=result,
             clear_active_replay_id=True,
         )

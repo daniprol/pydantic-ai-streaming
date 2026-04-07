@@ -101,6 +101,7 @@ async def stream_chat(
             session=session,
             repository=repository,
             conversation=conversation,
+            settings=resources.settings,
             result=result,
         )
 

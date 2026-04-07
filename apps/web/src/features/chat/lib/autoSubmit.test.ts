@@ -79,6 +79,28 @@ describe('lastAssistantMessageIsCompleteWithHitlResponses', () => {
     ).toBe(true)
   })
 
+  it('returns true when a cancelled form output has been provided', () => {
+    expect(
+      lastAssistantMessageIsCompleteWithHitlResponses({
+        messages: [
+          asUiMessage({
+            id: 'assistant-cancelled-form',
+            role: 'assistant',
+            parts: [
+              {
+                input: { title: 'Form required' },
+                output: { status: 'cancelled' },
+                state: 'output-available',
+                toolCallId: 'tool-cancelled',
+                type: 'tool-collect_human_form',
+              },
+            ],
+          }),
+        ],
+      }),
+    ).toBe(true)
+  })
+
   it('returns false when approval is still pending', () => {
     expect(
       lastAssistantMessageIsCompleteWithHitlResponses({

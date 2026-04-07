@@ -56,6 +56,7 @@ async def persist_temporal_run_output(payload: PersistRunOutputInput) -> None:
             session=session,
             repository=repository,
             conversation=conversation,
+            settings=runtime.settings,
             new_messages=deserialize_model_messages(payload.new_messages),
             clear_active_replay_id=True,
         )

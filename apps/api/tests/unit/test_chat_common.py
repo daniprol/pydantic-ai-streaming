@@ -58,6 +58,124 @@ def test_build_adapter_request_body_omits_assistant_resume_messages_from_adapter
     assert json.loads(adapter_request_body)['messages'] == []
 
 
+def test_parse_chat_request_keeps_assistant_resume_messages_alongside_new_user_message(
+    chat_request_factory,
+) -> None:
+    request_body = json.dumps(
+        chat_request_factory(
+            'What did I do?',
+            messages=[
+                {
+                    'id': 'assistant-1',
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': 'tool-form-1',
+                            'state': 'output-available',
+                            'input': {'title': 'Quick info form'},
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                },
+                {
+                    'id': 'user-1',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'What did I do?'}],
+                },
+            ],
+        )
+    ).encode()
+
+    parsed_request = parse_chat_request(request_body)
+
+    assert parsed_request.new_message is not None
+    assert parsed_request.new_message.role == 'user'
+    assert len(parsed_request.resume_messages) == 1
+    assert parsed_request.resume_messages[0].role == 'assistant'
+
+
+def test_parse_chat_request_extracts_explicit_hitl_resolution_payload() -> None:
+    request_body = json.dumps(
+        {
+            'trigger': 'submit-message',
+            'messages': [
+                {
+                    'id': 'user-1',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'What did I do?'}],
+                }
+            ],
+            'hitlResolution': {
+                'assistantMessageId': 'assistant-1',
+                'tool': 'collect_human_form',
+                'toolCallId': 'tool-form-1',
+                'output': {'status': 'cancelled'},
+            },
+        }
+    ).encode()
+
+    parsed_request = parse_chat_request(request_body)
+
+    assert parsed_request.new_message is not None
+    assert parsed_request.deferred_tool_results is not None
+    assert parsed_request.deferred_tool_results.calls == {'tool-form-1': {'status': 'cancelled'}}
+
+
+def test_build_adapter_request_body_keeps_only_new_user_message_when_assistant_resume_exists(
+    chat_request_factory,
+) -> None:
+    request_body = json.dumps(
+        chat_request_factory(
+            'What did I do?',
+            messages=[
+                {
+                    'id': 'assistant-1',
+                    'role': 'assistant',
+                    'parts': [
+                        {
+                            'type': 'tool-collect_human_form',
+                            'toolCallId': 'tool-form-1',
+                            'state': 'output-available',
+                            'input': {'title': 'Quick info form'},
+                            'output': {'status': 'cancelled'},
+                        }
+                    ],
+                },
+                {
+                    'id': 'user-1',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'What did I do?'}],
+                },
+            ],
+        )
+    ).encode()
+
+    parsed_request = parse_chat_request(request_body)
+    adapter_request_body = build_adapter_request_body(request_body, parsed_request=parsed_request)
+
+    messages = json.loads(adapter_request_body)['messages']
+    assert len(messages) == 1
+    assert messages[0]['id'] == 'user-1'
+    assert messages[0]['role'] == 'user'
+    assert messages[0]['parts'][0]['type'] == 'text'
+    assert messages[0]['parts'][0]['text'] == 'What did I do?'
+
+
+def test_build_settings_defaults_to_block_pending_policy() -> None:
+    from streaming_chat_api.settings import Settings
+
+    settings = Settings(
+        app_env='test',
+        app_name='streaming-chat-api-test',
+        app_cors_origins=['http://localhost:5173'],
+        redis_url='redis://unused',
+        use_test_model=True,
+    )
+
+    assert settings.pending_tool_policy == 'block'
+
+
 @pytest.mark.asyncio
 async def test_persist_assistant_messages_stores_all_assistant_ui_messages_once(
     db_session,
@@ -78,6 +196,7 @@ async def test_persist_assistant_messages_stores_all_assistant_ui_messages_once(
         session=db_session,
         repository=repository,
         conversation=conversation,
+        settings=type('SettingsStub', (), {'pending_tool_policy': 'block'})(),
         result=result,
     )
 

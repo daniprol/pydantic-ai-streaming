@@ -9,6 +9,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from streaming_chat_api.hitl_forms import build_onboarding_preferences_form
 from streaming_chat_api.settings import Settings
 from streaming_chat_api.support_client import FakeSupportClient
 
@@ -146,30 +147,7 @@ def build_support_agent(
         title: str,
         description: str,
     ) -> dict[str, object]:
-        raise CallDeferred(
-            metadata={
-                'title': title,
-                'description': description,
-                'submitLabel': 'Send form',
-                'schema': {
-                    'fields': [
-                        {
-                            'name': 'email',
-                            'label': 'Email',
-                            'kind': 'text',
-                            'required': True,
-                            'placeholder': 'name@example.com',
-                        },
-                        {
-                            'name': 'notes',
-                            'label': 'Notes',
-                            'kind': 'textarea',
-                            'required': False,
-                            'placeholder': 'Add any extra context',
-                        },
-                    ]
-                },
-            }
-        )
+        form = build_onboarding_preferences_form(title=title, description=description)
+        raise CallDeferred(metadata=form.ui_payload())
 
     return agent

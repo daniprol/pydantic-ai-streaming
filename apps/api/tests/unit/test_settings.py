@@ -122,3 +122,13 @@ def test_settings_keep_container_hosts_when_running_in_docker(
     )
     assert settings.redis_url == 'redis://redis:6379/0'
     assert settings.temporal_target_host == 'temporal:7233'
+
+
+def test_settings_accept_logger_level() -> None:
+    settings = build_settings(logger_level='debug')
+    assert settings.logger_level == 'debug'
+
+
+def test_settings_reject_invalid_logger_level() -> None:
+    with pytest.raises(ValidationError, match='logger_level'):
+        build_settings(logger_level='verbose')

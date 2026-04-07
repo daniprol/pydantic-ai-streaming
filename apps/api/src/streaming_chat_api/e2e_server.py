@@ -71,6 +71,7 @@ class _LocalTemporalClient:
                     session=session,
                     repository=repository,
                     conversation=conversation,
+                    settings=self.resources.settings,
                     result=result,
                     clear_active_replay_id=True,
                 )

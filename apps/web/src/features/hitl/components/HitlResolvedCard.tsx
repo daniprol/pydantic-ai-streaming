@@ -1,6 +1,6 @@
-import { CheckCircle2Icon, ShieldCheckIcon, ShieldXIcon, XCircleIcon } from 'lucide-react'
+import { CheckCircle2Icon, CircleSlash2Icon, ShieldCheckIcon, ShieldXIcon, XCircleIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 
-import { Tool, ToolContent } from '@/components/ai-elements/tool'
 import { getToolLabel } from '@/features/chat/lib/messageParts'
 import {
   getApprovalPayload,
@@ -11,52 +11,79 @@ import {
 } from '@/features/hitl/lib/types'
 import type { PendingToolCall } from '@/types/chat'
 
-const resolvedStateLabels = {
-  'approval-responded': 'Responded',
-  'output-available': 'Completed',
-  'output-denied': 'Denied',
-} as const
-
-type ResolvedToolHeaderProps = {
-  state: keyof typeof resolvedStateLabels
+function SummaryShell({
+  children,
+  description,
+  icon,
+  status,
+  title,
+}: {
+  children?: ReactNode
+  description?: string
+  icon: ReactNode
+  status: string
   title: string
-}
-
-function ResolvedToolHeader({ state, title }: ResolvedToolHeaderProps) {
-  const icon = state === 'approval-responded'
-    ? <ShieldCheckIcon className="size-4 text-blue-500" />
-    : state === 'output-denied'
-      ? <XCircleIcon className="size-4 text-amber-500" />
-      : <CheckCircle2Icon className="size-4 text-emerald-500" />
-
+}) {
   return (
-    <div className="flex items-center justify-between gap-4 p-3">
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="font-medium text-sm">{title}</span>
+    <div className="mt-3 rounded-2xl border border-border/60 bg-muted/15 px-4 py-3 shadow-none">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5">{icon}</div>
+          <div className="min-w-0 space-y-1">
+            <p className="truncate font-medium text-sm text-foreground">{title}</p>
+            <p className="text-sm text-muted-foreground">{status}</p>
+            {description ? <p className="text-sm leading-6 text-muted-foreground/90">{description}</p> : null}
+          </div>
+        </div>
       </div>
-      <div className="rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
-        {resolvedStateLabels[state]}
-      </div>
+      {children ? <div className="mt-3 border-t border-border/50 pt-3">{children}</div> : null}
     </div>
   )
 }
 
-function ResultBlock({ label, value }: { label: string; value: unknown }) {
-  if (value == null || value === '') {
+function DataList({ entries }: { entries: Array<{ label: string; value: string }> }) {
+  return (
+    <dl className="space-y-2">
+      {entries.map((entry) => (
+        <div className="flex items-start justify-between gap-4" key={entry.label}>
+          <dt className="text-sm text-muted-foreground">{entry.label}</dt>
+          <dd className="max-w-[65%] text-right text-sm text-foreground">{entry.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function formatValue(value: unknown): string | null {
+  if (value == null) {
     return null
   }
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No'
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+  }
+  if (typeof value === 'number') {
+    return String(value)
+  }
+  return null
+}
 
-  return (
-    <div className="space-y-1.5">
-      <p className="font-medium text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-      <div className="rounded-lg bg-background/80 px-3 py-2 text-sm text-foreground/90">
-        <pre className="whitespace-pre-wrap break-words font-sans">
-          {typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
-        </pre>
-      </div>
-    </div>
-  )
+function buildFormEntries(pendingToolCall: PendingToolCall): Array<{ label: string; value: string }> {
+  const payload = getFormPayload(pendingToolCall)
+  const result = getResolvedHitlSummary(pendingToolCall).result
+  if (!result || typeof result !== 'object') {
+    return []
+  }
+
+  const resultMap = result as Record<string, unknown>
+
+  return payload.fields.flatMap((field) => {
+    const formattedValue = formatValue(resultMap[field.name])
+    return formattedValue ? [{ label: field.label, value: formattedValue }] : []
+  })
 }
 
 export function HitlResolvedCard({
@@ -68,53 +95,53 @@ export function HitlResolvedCard({
 }) {
   const toolLabel = getToolLabel(part)
   const summary = getResolvedHitlSummary(pendingToolCall)
-  const isDenied = pendingToolCall.status === 'denied' || part.state === 'output-denied'
-
-  let title = toolLabel
-  let description: string | undefined
-  let resultValue: unknown = null
 
   if (pendingToolCall.kind === 'approval') {
     const payload = getApprovalPayload(pendingToolCall)
-    title = payload.title ?? toolLabel
-    description = payload.description
-    resultValue = summary.reason ?? (summary.approved ? 'Approved' : 'Rejected')
-  } else if (pendingToolCall.kind === 'decision') {
-    const payload = getDecisionPayload(pendingToolCall)
-    title = payload.title ?? toolLabel
-    description = payload.description
-    resultValue = summary.result
-  } else {
-    const payload = getFormPayload(pendingToolCall)
-    title = payload.title ?? toolLabel
-    description = payload.description
-    resultValue = summary.result
+    const approved = summary.approved === true && pendingToolCall.status === 'resolved'
+
+    return (
+      <SummaryShell
+        icon={approved ? <ShieldCheckIcon className="size-4 text-emerald-500" /> : <ShieldXIcon className="size-4 text-amber-500" />}
+        status={approved ? 'Approved' : 'Rejected'}
+        title={payload.title ?? toolLabel}
+      />
+    )
   }
 
-  const icon = pendingToolCall.kind === 'approval'
-    ? summary.approved
-      ? <ShieldCheckIcon className="size-4 text-emerald-500" />
-      : <ShieldXIcon className="size-4 text-amber-500" />
-    : isDenied
-      ? <XCircleIcon className="size-4 text-amber-500" />
-      : <CheckCircle2Icon className="size-4 text-emerald-500" />
+  if (pendingToolCall.kind === 'decision') {
+    const payload = getDecisionPayload(pendingToolCall)
+    const decision = summary.result && typeof summary.result === 'object' && 'decision' in (summary.result as Record<string, unknown>)
+      ? (summary.result as Record<string, unknown>).decision
+      : null
+    const accepted = decision === 'accepted'
+
+    return (
+      <SummaryShell
+        icon={accepted ? <CheckCircle2Icon className="size-4 text-emerald-500" /> : <XCircleIcon className="size-4 text-amber-500" />}
+        description={payload.description}
+        status={accepted ? 'Accepted' : 'Rejected'}
+        title={payload.title ?? toolLabel}
+      />
+    )
+  }
+
+  const payload = getFormPayload(pendingToolCall)
+  const cancelled = pendingToolCall.status === 'cancelled'
+  const entries = buildFormEntries(pendingToolCall)
 
   return (
-    <Tool className="mt-3 rounded-xl border-border/60 bg-muted/15 shadow-none" defaultOpen>
-      <ResolvedToolHeader state={part.state} title={title} />
-      <ToolContent className="space-y-4 border-t border-border/40 bg-background/40">
-        <div className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-3">
-          {icon}
-          <div className="space-y-1 text-sm">
-            <p className="font-medium text-foreground">{isDenied ? 'Human response recorded' : 'Human response applied'}</p>
-            <p className="text-muted-foreground">{description ?? title}</p>
-          </div>
-        </div>
-        <ResultBlock label={pendingToolCall.kind === 'form' ? 'Submitted data' : 'Response'} value={resultValue} />
-        <div className="rounded-lg bg-background/80 px-3 py-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground/80">Tool call:</span> {pendingToolCall.tool_call_id}
-        </div>
-      </ToolContent>
-    </Tool>
+    <SummaryShell
+      icon={cancelled ? <CircleSlash2Icon className="size-4 text-amber-500" /> : <CheckCircle2Icon className="size-4 text-emerald-500" />}
+      description={payload.description}
+      status={cancelled ? 'Cancelled' : 'Submitted'}
+      title={payload.title ?? toolLabel}
+    >
+      {cancelled ? (
+        <p className="text-sm text-muted-foreground">The form was cancelled and the conversation can continue.</p>
+      ) : (
+        <DataList entries={entries} />
+      )}
+    </SummaryShell>
   )
 }

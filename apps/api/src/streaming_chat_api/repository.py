@@ -185,6 +185,21 @@ class ConversationRepository:
         )
         return list(result.scalars().all())
 
+    async def list_pending_tool_calls_for_group(
+        self,
+        conversation_id: UUID,
+        pending_group_id: str,
+    ) -> list[PendingToolCall]:
+        result = await self.session.execute(
+            select(PendingToolCall)
+            .where(
+                PendingToolCall.conversation_id == conversation_id,
+                PendingToolCall.pending_group_id == pending_group_id,
+            )
+            .order_by(PendingToolCall.created_at.asc())
+        )
+        return list(result.scalars().all())
+
     async def get_pending_tool_call_by_tool_call_id(
         self,
         conversation_id: UUID,
@@ -208,6 +223,39 @@ class ConversationRepository:
         pending_tool_call.status = status
         pending_tool_call.resolution_json = resolution_json
         pending_tool_call.resolved_at = utcnow()
+
+    async def has_message_after_sequence(
+        self,
+        conversation_id: UUID,
+        sequence: int,
+    ) -> bool:
+        result = await self.session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.sequence > sequence,
+            )
+        )
+        return bool(result)
+
+    async def replace_message_model_messages(
+        self,
+        *,
+        conversation_id: UUID,
+        sequence: int,
+        model_messages_json: list,
+    ) -> None:
+        result = await self.session.execute(
+            select(Message).where(
+                Message.conversation_id == conversation_id,
+                Message.sequence == sequence,
+            )
+        )
+        message = result.scalar_one_or_none()
+        if message is None:
+            return
+        message.model_messages_json = model_messages_json
 
     async def delete_pending_tool_calls_for_group(
         self,

@@ -44,6 +44,20 @@ class PendingToolResolution:
     resolution_json: dict[str, Any]
 
 
+@dataclass(slots=True)
+class PendingToolRunContext:
+    message_history: list[ModelMessage]
+    deferred_tool_results: DeferredToolResults | None
+    should_run_agent: bool
+
+
+class SkipResolution:
+    pass
+
+
+SKIP_RESOLUTION = SkipResolution()
+
+
 def classify_pending_tool_call(tool_name: str) -> PendingToolCallKind:
     if tool_name in APPROVAL_TOOL_NAMES:
         return PendingToolCallKind.APPROVAL
@@ -80,8 +94,10 @@ def build_pending_tool_ui_payload(
             'description': request_metadata.get('description')
             or tool_args.get('description')
             or '',
-            'schema': tool_args.get('schema') or request_metadata.get('schema') or {'fields': []},
+            'fields': request_metadata.get('fields') or [],
+            'schema': request_metadata.get('schema') or tool_args.get('schema') or {},
             'submitLabel': request_metadata.get('submitLabel') or 'Submit',
+            'cancelLabel': request_metadata.get('cancelLabel') or 'Cancel',
         }
     return {
         'title': request_metadata.get('title') or tool_args.get('title') or 'Decision required',
@@ -210,6 +226,45 @@ def merge_deferred_tool_results(
     return DeferredToolResults(calls=calls, approvals=approvals)
 
 
+def filter_pending_deferred_tool_results(
+    deferred_tool_results: DeferredToolResults | None,
+    resolutions: Sequence[PendingToolResolution],
+) -> DeferredToolResults | None:
+    if deferred_tool_results is None:
+        return None
+
+    resolved_tool_call_ids = {resolution.tool_call_id for resolution in resolutions}
+    if not resolved_tool_call_ids:
+        return None
+
+    remaining_calls = {
+        tool_call_id: result
+        for tool_call_id, result in deferred_tool_results.calls.items()
+        if tool_call_id in resolved_tool_call_ids
+    }
+    remaining_approvals = {
+        tool_call_id: result
+        for tool_call_id, result in deferred_tool_results.approvals.items()
+        if tool_call_id in resolved_tool_call_ids
+    }
+    if not remaining_calls and not remaining_approvals:
+        return None
+
+    metadata = None
+    if deferred_tool_results.metadata:
+        metadata = {
+            tool_call_id: value
+            for tool_call_id, value in deferred_tool_results.metadata.items()
+            if tool_call_id in resolved_tool_call_ids
+        }
+
+    return DeferredToolResults(
+        calls=remaining_calls,
+        approvals=remaining_approvals,
+        metadata=metadata,
+    )
+
+
 def extract_tool_outputs_from_resume_messages(
     messages: Sequence[UIMessage],
 ) -> DeferredToolResults | None:
@@ -244,15 +299,14 @@ async def validate_and_resolve_pending_tool_results(
     resolutions: list[PendingToolResolution] = []
 
     for tool_call_id, approval_result in deferred_tool_results.approvals.items():
-        pending_tool_call = await repository.get_pending_tool_call_by_tool_call_id(
-            conversation.id,
-            tool_call_id,
+        pending_tool_call_or_skip = await _get_pending_tool_call_for_resolution(
+            repository=repository,
+            conversation=conversation,
+            tool_call_id=tool_call_id,
         )
-        if pending_tool_call is None or pending_tool_call.status != PendingToolCallStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Unknown or resolved pending tool call: {tool_call_id}',
-            )
+        if pending_tool_call_or_skip is SKIP_RESOLUTION:
+            continue
+        pending_tool_call = pending_tool_call_or_skip
         if approval_result is True:
             resolutions.append(
                 PendingToolResolution(
@@ -282,18 +336,19 @@ async def validate_and_resolve_pending_tool_results(
             )
 
     for tool_call_id, result in deferred_tool_results.calls.items():
-        pending_tool_call = await repository.get_pending_tool_call_by_tool_call_id(
-            conversation.id,
-            tool_call_id,
+        pending_tool_call_or_skip = await _get_pending_tool_call_for_resolution(
+            repository=repository,
+            conversation=conversation,
+            tool_call_id=tool_call_id,
         )
-        if pending_tool_call is None or pending_tool_call.status != PendingToolCallStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Unknown or resolved pending tool call: {tool_call_id}',
-            )
+        if pending_tool_call_or_skip is SKIP_RESOLUTION:
+            continue
+        pending_tool_call = pending_tool_call_or_skip
         resolution_status = PendingToolCallStatus.RESOLVED
         if isinstance(result, dict) and result.get('decision') == 'rejected':
             resolution_status = PendingToolCallStatus.DENIED
+        if isinstance(result, dict) and result.get('status') == 'cancelled':
+            resolution_status = PendingToolCallStatus.CANCELLED
         resolutions.append(
             PendingToolResolution(
                 tool_call_id=tool_call_id,
@@ -303,6 +358,26 @@ async def validate_and_resolve_pending_tool_results(
         )
 
     return resolutions
+
+
+async def _get_pending_tool_call_for_resolution(
+    *,
+    repository: ConversationRepository,
+    conversation: Conversation,
+    tool_call_id: str,
+) -> PendingToolCall | SkipResolution:
+    pending_tool_call = await repository.get_pending_tool_call_by_tool_call_id(
+        conversation.id,
+        tool_call_id,
+    )
+    if pending_tool_call is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Unknown pending tool call: {tool_call_id}',
+        )
+    if pending_tool_call.status != PendingToolCallStatus.PENDING:
+        return SKIP_RESOLUTION
+    return pending_tool_call
 
 
 async def apply_pending_tool_resolutions(
@@ -396,12 +471,14 @@ def hydrate_hitl_ui_message(
             parts.append(updated_part)
             continue
 
-        if pending.kind.value in {'decision', 'form'} and current_state == 'input-available':
-            if pending.status.value == 'resolved':
+        if pending.kind.value in {'decision', 'form'} and current_state in {
+            'input-available',
+            'output-available',
+            'output-denied',
+        }:
+            if pending.status.value in {'resolved', 'denied', 'cancelled'}:
                 updated_part['state'] = 'output-available'
                 updated_part['output'] = (pending.resolution_json or {}).get('result')
-            elif pending.status.value == 'denied':
-                updated_part['state'] = 'output-denied'
             parts.append(updated_part)
             continue
 
@@ -430,3 +507,92 @@ def pending_tool_policy_allows_continue(policy: PendingToolPolicy) -> bool:
 
 def result_output_is_deferred_requests(result_output: Any) -> bool:
     return isinstance(result_output, DeferredToolRequestsOutput)
+
+
+async def build_pending_tool_run_context(
+    *,
+    repository: ConversationRepository,
+    conversation: Conversation,
+    current_history: list[ModelMessage],
+    deferred_tool_results: DeferredToolResults | None,
+) -> PendingToolRunContext:
+    if deferred_tool_results is None:
+        return PendingToolRunContext(
+            message_history=current_history,
+            deferred_tool_results=None,
+            should_run_agent=True,
+        )
+
+    resolved_tool_call_ids = {
+        *deferred_tool_results.calls.keys(),
+        *deferred_tool_results.approvals.keys(),
+    }
+    if not resolved_tool_call_ids:
+        return PendingToolRunContext(
+            message_history=current_history,
+            deferred_tool_results=None,
+            should_run_agent=False,
+        )
+
+    matching_pending_tool_calls = [
+        pending_tool_call
+        for tool_call_id in resolved_tool_call_ids
+        if (
+            pending_tool_call := await repository.get_pending_tool_call_by_tool_call_id(
+                conversation.id,
+                tool_call_id,
+            )
+        )
+        is not None
+    ]
+    if not matching_pending_tool_calls:
+        return PendingToolRunContext(
+            message_history=current_history,
+            deferred_tool_results=None,
+            should_run_agent=False,
+        )
+
+    pending_group_ids = {
+        pending_tool_call.pending_group_id for pending_tool_call in matching_pending_tool_calls
+    }
+    if len(pending_group_ids) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Deferred tool results must belong to the same pending tool group.',
+        )
+
+    pending_tool_call = matching_pending_tool_calls[0]
+    from streaming_chat_api.services.common import deserialize_model_messages
+
+    branch_history = deserialize_model_messages(pending_tool_call.resume_model_messages_json)
+    has_follow_up_messages = await repository.has_message_after_sequence(
+        conversation.id,
+        pending_tool_call.message_sequence,
+    )
+    should_run_agent = True
+    if has_follow_up_messages and not _deferred_results_require_agent_resume(deferred_tool_results):
+        should_run_agent = False
+
+    return PendingToolRunContext(
+        message_history=branch_history,
+        deferred_tool_results=None if not should_run_agent else deferred_tool_results,
+        should_run_agent=should_run_agent,
+    )
+
+
+def _deferred_results_require_agent_resume(
+    deferred_tool_results: DeferredToolResults,
+) -> bool:
+    if deferred_tool_results.approvals:
+        return True
+
+    for result in deferred_tool_results.calls.values():
+        if not isinstance(result, dict):
+            return True
+        if result.get('status') == 'cancelled':
+            continue
+        if result.get('decision') == 'rejected':
+            continue
+        return True
+
+    return False

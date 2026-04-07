@@ -89,6 +89,7 @@ class ChatRequestEnvelope(BaseModel):
         default=None,
         alias='deferredToolResults',
     )
+    hitl_resolution: dict[str, Any] | None = Field(default=None, alias='hitlResolution')
 
 
 class DependencyStatus(BaseModel):

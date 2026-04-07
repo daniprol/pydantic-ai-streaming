@@ -11,6 +11,7 @@ from sqlalchemy.engine.url import make_url
 
 ThinkingLevel = Literal['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 PendingToolPolicy = Literal['block', 'allow_continue']
+LoggerLevel = Literal['debug', 'info', 'warning', 'error', 'critical']
 
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -90,6 +91,7 @@ class Settings(BaseSettings):
     thinking_level: ThinkingLevel = 'minimal'
     use_test_model: bool = False
     pending_tool_policy: PendingToolPolicy = 'block'
+    logger_level: LoggerLevel = 'info'
 
     @property
     def is_dev(self) -> bool:

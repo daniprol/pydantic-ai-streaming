@@ -42,12 +42,14 @@ export function HitlToolPart({
   pendingToolCalls,
   disabled,
   onApprovalResponse,
+  onFormCancel,
   onToolOutput,
 }: {
   part: unknown
   pendingToolCalls: PendingToolCall[]
   disabled: boolean
   onApprovalResponse: (approvalId: string, approved: boolean) => void
+  onFormCancel: (toolName: string, toolCallId: string) => void
   onToolOutput: (toolName: string, toolCallId: string, output: unknown) => void
 }) {
   if (!isToolPartWithCallId(part)) {
@@ -120,6 +122,9 @@ export function HitlToolPart({
     return (
       <PendingFormCard
         disabled={disabled}
+        onCancel={() => {
+          onFormCancel(toolName, part.toolCallId)
+        }}
         onSubmit={(values) => {
           onToolOutput(toolName, part.toolCallId, values)
         }}

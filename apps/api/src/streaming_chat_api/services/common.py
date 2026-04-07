@@ -39,6 +39,7 @@ from streaming_chat_api.schemas import (
 )
 from streaming_chat_api.services.hitl import (
     hydrate_hitl_ui_message,
+    pending_tool_policy_allows_continue,
     pending_tool_call_to_response,
     persist_pending_tool_calls,
     result_output_is_deferred_requests,
@@ -144,17 +145,33 @@ def parse_chat_request(request_body: bytes) -> ParsedChatRequest:
             calls=payload.deferred_tool_results.calls,
             approvals=payload.deferred_tool_results.approvals,
         )
+    if payload.hitl_resolution is not None:
+        tool_call_id = payload.hitl_resolution.get('toolCallId')
+        output = payload.hitl_resolution.get('output')
+        if isinstance(tool_call_id, str):
+            hitl_resolution_results = DeferredToolResults(
+                calls={tool_call_id: output}, approvals={}
+            )
+            deferred_tool_results = (
+                hitl_resolution_results
+                if deferred_tool_results is None
+                else DeferredToolResults(
+                    calls={**deferred_tool_results.calls, **hitl_resolution_results.calls},
+                    approvals={
+                        **deferred_tool_results.approvals,
+                        **hitl_resolution_results.approvals,
+                    },
+                )
+            )
 
     new_message = None
     resume_messages: list[UIMessage] = []
     if payload.trigger == 'submit-message':
+        resume_messages = [message for message in ui_messages if message.role == 'assistant']
         for message in reversed(ui_messages):
             if message.role == 'user':
                 new_message = message
                 break
-
-        if new_message is None:
-            resume_messages = [message for message in ui_messages if message.role == 'assistant']
 
     if (
         new_message is None
@@ -223,6 +240,7 @@ async def persist_assistant_model_messages(
     session: AsyncSession,
     repository: ConversationRepository,
     conversation: Conversation,
+    settings: Any,
     new_messages: Sequence[ModelMessage],
     result_output: Any | None = None,
     clear_active_replay_id: bool = False,
@@ -238,6 +256,7 @@ async def persist_assistant_model_messages(
         if assistant_ui_messages:
             next_sequence = await repository.next_sequence(conversation.id)
             pending_tool_calls = []
+            serialized_assistant_messages = serialize_model_messages(assistant_messages)
             if result_output_is_deferred_requests(result_output):
                 pending_tool_calls = await persist_pending_tool_calls(
                     repository=repository,
@@ -247,7 +266,12 @@ async def persist_assistant_model_messages(
                     resume_model_messages=assistant_messages,
                 )
 
-            serialized_assistant_messages = serialize_model_messages(assistant_messages)
+            persist_model_messages = serialized_assistant_messages
+            if pending_tool_calls and pending_tool_policy_allows_continue(
+                settings.pending_tool_policy
+            ):
+                persist_model_messages = []
+
             for index, assistant_message in enumerate(assistant_ui_messages):
                 assistant_message_json = assistant_message.model_dump(mode='json', by_alias=True)
                 await repository.append_message(
@@ -255,7 +279,7 @@ async def persist_assistant_model_messages(
                     role='assistant',
                     sequence=next_sequence + index,
                     ui_message_json=assistant_message_json,
-                    model_messages_json=serialized_assistant_messages if index == 0 else [],
+                    model_messages_json=persist_model_messages if index == 0 else [],
                 )
             preview = preview_from_messages(assistant_ui_messages)
             await repository.update_conversation_preview(
@@ -274,6 +298,7 @@ async def persist_assistant_messages(
     session: AsyncSession,
     repository: ConversationRepository,
     conversation: Conversation,
+    settings: Any,
     result: AgentRunResult[Any],
     clear_active_replay_id: bool = False,
 ) -> None:
@@ -281,6 +306,7 @@ async def persist_assistant_messages(
         session=session,
         repository=repository,
         conversation=conversation,
+        settings=settings,
         new_messages=result.new_messages(),
         result_output=result.output,
         clear_active_replay_id=clear_active_replay_id,
@@ -324,10 +350,10 @@ def build_adapter_request_body(
         payload = json.loads(request_body)
     except JSONDecodeError:
         return request_body
-    if parsed_request.new_message is None:
-        payload['messages'] = []
-    else:
-        payload['messages'] = [parsed_request.new_message.model_dump(mode='json', by_alias=True)]
+    adapter_messages: list[dict[str, Any]] = []
+    if parsed_request.new_message is not None:
+        adapter_messages.append(parsed_request.new_message.model_dump(mode='json', by_alias=True))
+    payload['messages'] = adapter_messages
     return json.dumps(payload).encode('utf-8')
 
 

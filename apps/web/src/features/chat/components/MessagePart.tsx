@@ -7,11 +7,13 @@ import { Tool } from '@/components/ai-elements/tool'
 import { Badge } from '@/components/ui/badge'
 import type { PendingToolCall, UIConversationMessage } from '@/types/chat'
 import { CopyIcon, RefreshCcwIcon, WrenchIcon } from 'lucide-react'
+import { useMemo } from 'react'
 
 import {
   getToolLabel,
   getToolPartKey,
   getToolStatusLabel,
+  isHitlToolPart,
   isReasoningPart,
   isTextPart,
   isToolCompleted,
@@ -38,6 +40,7 @@ interface ChatMessagePartsProps {
   pendingToolCalls?: PendingToolCall[]
   hitlBusy?: boolean
   onApprovalResponse?: (approvalId: string, approved: boolean) => void
+  onFormCancel?: (toolName: string, toolCallId: string) => void
   onToolOutput?: (toolName: string, toolCallId: string, output: unknown) => void
 }
 
@@ -137,6 +140,9 @@ export function MessagePart({ part, message, status, regen, index, lastMessage }
   }
 
   if (isToolPart(part)) {
+    if (isHitlToolPart(part)) {
+      return null
+    }
     return <ToolCall part={part} />
   }
 
@@ -151,8 +157,30 @@ export function ChatMessageParts({
   pendingToolCalls = [],
   hitlBusy = false,
   onApprovalResponse,
+  onFormCancel,
   onToolOutput,
 }: ChatMessagePartsProps) {
+  const hiddenHitlToolCallIds = useMemo(() => {
+    const toolCallIds = new Set<string>()
+    const duplicateToolCallIds = new Set<string>()
+
+    for (const part of message.parts) {
+      if (typeof part !== 'object' || part === null || !('toolCallId' in part)) {
+        continue
+      }
+      const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : null
+      if (!toolCallId || !isHitlToolPart(part)) {
+        continue
+      }
+      if (toolCallIds.has(toolCallId)) {
+        duplicateToolCallIds.add(toolCallId)
+      }
+      toolCallIds.add(toolCallId)
+    }
+
+    return duplicateToolCallIds
+  }, [message.parts])
+
   const content = segmentMessageParts(message.parts).map((segment) => {
     if (segment.kind === 'tool-group') {
       return (
@@ -165,6 +193,32 @@ export function ChatMessageParts({
       )
     }
 
+    const segmentToolCallId =
+      typeof segment.part === 'object' &&
+      segment.part !== null &&
+      'toolCallId' in segment.part &&
+      typeof segment.part.toolCallId === 'string'
+        ? segment.part.toolCallId
+        : null
+
+    if (segmentToolCallId && hiddenHitlToolCallIds.has(segmentToolCallId)) {
+      const lastIndex = message.parts.reduce((currentIndex, currentPart, partIndex) => {
+        if (
+          typeof currentPart === 'object' &&
+          currentPart !== null &&
+          'toolCallId' in currentPart &&
+          currentPart.toolCallId === segmentToolCallId
+        ) {
+          return partIndex
+        }
+        return currentIndex
+      }, -1)
+
+      if (segment.index !== lastIndex) {
+        return null
+      }
+    }
+
     return (
       <div key={`${message.id}-${segment.index}`}>
         <MessagePart
@@ -175,10 +229,11 @@ export function ChatMessageParts({
           regen={regen}
           status={status}
         />
-        {onApprovalResponse && onToolOutput ? (
+        {onApprovalResponse && onToolOutput && onFormCancel ? (
           <HitlToolPart
             disabled={hitlBusy}
             onApprovalResponse={onApprovalResponse}
+            onFormCancel={onFormCancel}
             onToolOutput={onToolOutput}
             part={segment.part}
             pendingToolCalls={pendingToolCalls}

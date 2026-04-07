@@ -22,15 +22,55 @@ export function createTransport({ flow, conversationId, replayId }: TransportOpt
       id?: string
     }) => {
       const latestMessage = messages.at(-1)
+      const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user')
+      const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
       const trigger = body?.trigger ?? 'submit-message'
-      const shouldSendLatestMessage = trigger === 'submit-message' && Boolean(latestMessage)
+      const hitlResolution = body?.hitlResolution as
+        | {
+            assistantMessageId: string
+            tool: string
+            toolCallId: string
+            output?: unknown
+          }
+        | undefined
+
+      let requestMessages: UIConversationMessage[] = []
+
+      if (trigger === 'submit-message') {
+        if (hitlResolution) {
+          requestMessages = [
+            {
+              id: hitlResolution.assistantMessageId,
+              role: 'assistant',
+              parts: [
+                {
+                  output: hitlResolution.output,
+                  state: 'output-available',
+                  toolCallId: hitlResolution.toolCallId,
+                  type: `tool-${hitlResolution.tool}`,
+                },
+              ],
+            },
+          ]
+          if (latestUserMessage) {
+            requestMessages.push(latestUserMessage)
+          }
+        } else if (latestMessage?.role === 'assistant') {
+          requestMessages = latestAssistantMessage ? [latestAssistantMessage] : []
+        } else if (latestUserMessage) {
+          requestMessages = latestAssistantMessage ? [latestAssistantMessage, latestUserMessage] : [latestUserMessage]
+        }
+      }
+
+      const nextBody = { ...body }
+      delete nextBody.hitlResolution
 
       return {
         body: {
-          ...body,
+          ...nextBody,
           trigger,
           id,
-          messages: latestMessage && shouldSendLatestMessage ? [latestMessage] : [],
+          messages: requestMessages,
         },
       }
     },
