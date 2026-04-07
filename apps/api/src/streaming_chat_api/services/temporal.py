@@ -125,7 +125,7 @@ async def stream_chat(
     request_body = await request.body()
     parsed_request = parse_chat_request(request_body)
     conversation = await get_required_conversation(repository, conversation_id, FLOW_TYPE)
-    history = await load_message_history(repository, conversation.id)
+    history = await load_message_history(repository, conversation.id, resources.settings)
 
     if parsed_request.new_message is not None:
         await append_user_message(repository, conversation, parsed_request.new_message)

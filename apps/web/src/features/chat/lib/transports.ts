@@ -58,7 +58,7 @@ export function createTransport({ flow, conversationId, replayId }: TransportOpt
         } else if (latestMessage?.role === 'assistant') {
           requestMessages = latestAssistantMessage ? [latestAssistantMessage] : []
         } else if (latestUserMessage) {
-          requestMessages = latestAssistantMessage ? [latestAssistantMessage, latestUserMessage] : [latestUserMessage]
+          requestMessages = [latestUserMessage]
         }
       }
 

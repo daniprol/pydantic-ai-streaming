@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     azure_openai_model: str = 'gpt-5-mini'
     thinking_level: ThinkingLevel = 'minimal'
     use_test_model: bool = False
-    pending_tool_policy: PendingToolPolicy = 'block'
+    pending_tool_policy: PendingToolPolicy = 'allow_continue'
     logger_level: LoggerLevel = 'info'
 
     @property

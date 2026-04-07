@@ -153,22 +153,37 @@ async def test_basic_flow_accepts_native_tool_approval_submission(
 
 @pytest.mark.asyncio
 async def test_basic_flow_blocks_new_user_message_while_pending_by_default(
-    api_client,
+    test_settings,
+    resources,
     chat_request_factory,
 ) -> None:
-    create_response = await api_client.post('/api/v1/flows/basic/conversations')
-    conversation_id = create_response.json()['conversation']['id']
+    import httpx
+    from asgi_lifespan import LifespanManager
+    from streaming_chat_api.main import create_app
 
-    await api_client.post(
-        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
-        json=chat_request_factory(
-            '[hitl-decision] Ask a human to accept or reject whether we should proceed.'
-        ),
-    )
-    response = await api_client.post(
-        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
-        json=chat_request_factory('A fresh message while pending'),
-    )
+    settings = test_settings.model_copy(update={'pending_tool_policy': 'block'})
+    block_app = create_app(settings)
+    block_app.state.resources = resources
+    block_app.state.settings = settings
+
+    async with LifespanManager(block_app):
+        transport = httpx.ASGITransport(app=block_app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url='http://testserver'
+        ) as block_api_client:
+            create_response = await block_api_client.post('/api/v1/flows/basic/conversations')
+            conversation_id = create_response.json()['conversation']['id']
+
+            await block_api_client.post(
+                f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+                json=chat_request_factory(
+                    '[hitl-decision] Ask a human to accept or reject whether we should proceed.'
+                ),
+            )
+            response = await block_api_client.post(
+                f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+                json=chat_request_factory('A fresh message while pending'),
+            )
 
     assert response.status_code == 409
     assert (
@@ -650,6 +665,53 @@ async def test_basic_flow_allows_new_message_when_pending_policy_is_allow_contin
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_allow_continue_accepts_real_pending_assistant_plus_user_follow_up_shape_without_resolution(
+    allow_continue_api_client,
+    chat_request_factory,
+) -> None:
+    create_response = await allow_continue_api_client.post('/api/v1/flows/basic/conversations')
+    conversation_id = create_response.json()['conversation']['id']
+
+    await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json=chat_request_factory(
+            '[hitl-decision] Ask a human to accept or reject whether we should proceed.'
+        ),
+    )
+    messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+    assistant_message = messages.json()['messages'][-1]
+    pending_tool_call = messages.json()['pending_tool_calls'][0]
+
+    response = await allow_continue_api_client.post(
+        f'/api/v1/flows/basic/chat?conversation_id={conversation_id}',
+        json={
+            'trigger': 'submit-message',
+            'id': str(conversation_id),
+            'messages': [
+                assistant_message,
+                {
+                    'id': 'user-follow-up',
+                    'role': 'user',
+                    'parts': [{'type': 'text', 'text': 'what other tools do you have?'}],
+                },
+            ],
+        },
+    )
+    refreshed_messages = await allow_continue_api_client.get(
+        f'/api/v1/flows/basic/conversations/{conversation_id}/messages'
+    )
+
+    assert response.status_code == 200
+    assert (
+        refreshed_messages.json()['pending_tool_calls'][0]['tool_call_id']
+        == pending_tool_call['tool_call_id']
+    )
+    assert refreshed_messages.json()['pending_tool_calls'][0]['status'] == 'pending'
 
 
 @pytest.mark.asyncio

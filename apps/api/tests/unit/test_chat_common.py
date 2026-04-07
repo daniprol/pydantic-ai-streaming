@@ -11,6 +11,7 @@ from streaming_chat_api.schemas import PendingToolCallResponse
 from streaming_chat_api.services.common import (
     build_adapter_request_body,
     build_messages_response,
+    load_message_history,
     parse_chat_request,
     persist_assistant_messages,
     serialize_model_messages,
@@ -162,7 +163,7 @@ def test_build_adapter_request_body_keeps_only_new_user_message_when_assistant_r
     assert messages[0]['parts'][0]['text'] == 'What did I do?'
 
 
-def test_build_settings_defaults_to_block_pending_policy() -> None:
+def test_build_settings_defaults_to_allow_continue_pending_policy() -> None:
     from streaming_chat_api.settings import Settings
 
     settings = Settings(
@@ -173,7 +174,7 @@ def test_build_settings_defaults_to_block_pending_policy() -> None:
         use_test_model=True,
     )
 
-    assert settings.pending_tool_policy == 'block'
+    assert settings.pending_tool_policy == 'allow_continue'
 
 
 @pytest.mark.asyncio
@@ -210,6 +211,78 @@ async def test_persist_assistant_messages_stores_all_assistant_ui_messages_once(
     assert repository.flatten_model_messages(messages) == serialize_model_messages(
         assistant_messages
     )
+
+
+@pytest.mark.asyncio
+async def test_load_message_history_strips_pending_branch_messages_when_allow_continue(
+    db_session,
+    repository_factory,
+    conversation_factory,
+    message_factory,
+) -> None:
+    from streaming_chat_api.models import PendingToolCallKind
+
+    repository = repository_factory(db_session)
+    conversation = await conversation_factory(db_session)
+    await message_factory(
+        db_session,
+        conversation_id=conversation.id,
+        role='user',
+        sequence=1,
+        ui_message_json={
+            'id': 'user-1',
+            'role': 'user',
+            'parts': [{'type': 'text', 'text': 'hello'}],
+        },
+        model_messages_json=[
+            {
+                'parts': [{'content': 'hello', 'part_kind': 'user-prompt'}],
+                'kind': 'request',
+            }
+        ],
+    )
+    await message_factory(
+        db_session,
+        conversation_id=conversation.id,
+        role='assistant',
+        sequence=2,
+        ui_message_json={'id': 'assistant-pending', 'role': 'assistant'},
+        model_messages_json=[
+            {
+                'kind': 'response',
+                'model_name': 'test',
+                'parts': [
+                    {
+                        'tool_call_id': 'pending-1',
+                        'tool_name': 'request_human_decision',
+                        'args': {'title': 'Decision required'},
+                        'part_kind': 'tool-call',
+                    }
+                ],
+            }
+        ],
+    )
+    await repository.create_pending_tool_call(
+        conversation_id=conversation.id,
+        tool_call_id='pending-1',
+        pending_group_id='group-1',
+        tool_name='request_human_decision',
+        kind=PendingToolCallKind.DECISION,
+        message_sequence=2,
+        approval_id=None,
+        args_json={},
+        request_metadata_json={},
+        ui_payload_json={},
+        resume_model_messages_json=[],
+    )
+
+    history = await load_message_history(
+        repository,
+        conversation.id,
+        type('SettingsStub', (), {'pending_tool_policy': 'allow_continue'})(),
+    )
+
+    assert len(history) == 1
 
 
 def test_build_messages_response_hydrates_resolved_hitl_states() -> None:

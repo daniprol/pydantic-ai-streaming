@@ -37,6 +37,7 @@ from streaming_chat_api.schemas import (
     OffsetPaginationParams,
     PendingToolCallResponse,
 )
+from streaming_chat_api.settings import Settings
 from streaming_chat_api.services.hitl import (
     hydrate_hitl_ui_message,
     pending_tool_policy_allows_continue,
@@ -208,8 +209,15 @@ async def get_required_conversation(
 async def load_message_history(
     repository: ConversationRepository,
     conversation_id: UUID,
+    settings: Settings,
 ) -> list[ModelMessage]:
     history_rows = await repository.list_messages(conversation_id)
+    if pending_tool_policy_allows_continue(settings.pending_tool_policy):
+        pending_tool_calls = await repository.list_pending_tool_calls(conversation_id)
+        detached_sequences = {
+            pending_tool_call.message_sequence for pending_tool_call in pending_tool_calls
+        }
+        history_rows = [row for row in history_rows if row.sequence not in detached_sequences]
     return deserialize_model_messages(repository.flatten_model_messages(history_rows))
 
 

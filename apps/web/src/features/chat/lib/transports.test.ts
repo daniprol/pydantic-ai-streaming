@@ -25,14 +25,11 @@ describe('createTransport', () => {
 
     expect(request.body.trigger).toBe('submit-message')
     expect(request.body.id).toBe('request-1')
-    expect(request.body.messages).toEqual([
-      { id: 'one', role: 'assistant' },
-      { id: 'two', role: 'user' },
-    ])
+    expect(request.body.messages).toEqual([{ id: 'two', role: 'user' }])
     expect(request.body.custom).toBe(true)
   })
 
-  it('sends the latest assistant HITL resolution together with the new user message', () => {
+  it('does not resend assistant HITL parts when sending a normal follow-up user message', () => {
     const transport = createTransport({
       flow: 'basic',
       conversationId: 'conversation-1',
@@ -65,21 +62,7 @@ describe('createTransport', () => {
       ],
     })
 
-    expect(request.body.messages).toEqual([
-      {
-        id: 'assistant-hitl',
-        parts: [
-          {
-            output: { status: 'cancelled' },
-            state: 'output-available',
-            toolCallId: 'tool-form',
-            type: 'tool-collect_human_form',
-          },
-        ],
-        role: 'assistant',
-      },
-      { id: 'user-next', role: 'user' },
-    ])
+    expect(request.body.messages).toEqual([{ id: 'user-next', role: 'user' }])
   })
 
   it('sends assistant tool-part updates when resuming a deferred tool call', () => {
@@ -226,7 +209,7 @@ describe('createTransport', () => {
     ])
   })
 
-  it('keeps hydrated denied deferred outputs when sending a follow-up message', () => {
+  it('does not resend hydrated deferred outputs when sending a follow-up message', () => {
     const transport = createTransport({
       flow: 'basic',
       conversationId: 'conversation-1',
@@ -259,20 +242,6 @@ describe('createTransport', () => {
       ],
     })
 
-    expect(request.body.messages).toEqual([
-      {
-        id: 'assistant-form-denied',
-        parts: [
-          {
-            output: { status: 'cancelled' },
-            state: 'output-denied',
-            toolCallId: 'tool-form-denied',
-            type: 'tool-collect_human_form',
-          },
-        ],
-        role: 'assistant',
-      },
-      { id: 'user-followup', role: 'user' },
-    ])
+    expect(request.body.messages).toEqual([{ id: 'user-followup', role: 'user' }])
   })
 })

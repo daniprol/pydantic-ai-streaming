@@ -29,6 +29,7 @@ from streaming_chat_api.services.common import (
     load_pending_tool_call_responses,
     parse_chat_request,
     persist_assistant_messages,
+    serialize_model_messages,
 )
 from streaming_chat_api.services.hitl import (
     build_pending_tool_run_context,
@@ -103,7 +104,7 @@ async def stream_chat(
     request_body = await request.body()
     parsed_request = parse_chat_request(request_body)
     conversation = await get_required_conversation(repository, conversation_id, FLOW_TYPE)
-    history = await load_message_history(repository, conversation.id)
+    history = await load_message_history(repository, conversation.id, resources.settings)
     unresolved_pending_tool_calls = await repository.list_unresolved_pending_tool_calls(
         conversation.id
     )
@@ -210,6 +211,8 @@ async def stream_chat(
                     'calls': resolved_deferred_tool_results.calls,
                     'approvals': resolved_deferred_tool_results.approvals,
                 }
+            log_fields['message_history'] = serialize_model_messages(run_context.message_history)
+            log_fields['request_messages'] = serialize_model_messages(adapter.messages)
             logger.exception('basic_chat_stream_failed', **log_fields)
             raise
 

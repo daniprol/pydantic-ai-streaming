@@ -46,7 +46,7 @@ def test_build_pending_tool_ui_payload_classifies_form_payload() -> None:
 
 
 def test_pending_policy_blocks_new_message_by_default() -> None:
-    settings = build_settings()
+    settings = build_settings(pending_tool_policy='block')
 
     blocked = pending_policy_blocks_new_message(
         settings=settings,
